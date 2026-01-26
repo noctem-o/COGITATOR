@@ -1,8 +1,4 @@
-diff --git a/README.md b/README.md
-index 69fd9fc87d1c8db16ce8674a2261ca14b1073ed2..871794a8e8b0ecc434ab5c3e8bb3c9ae2cc6df55 100644
---- a/README.md
-+++ b/README.md
-@@ -1,10 +1,34 @@
+
  # COGITATOR v2.1.3
  
  Deterministic evaluation harness for autonomous security agents.
