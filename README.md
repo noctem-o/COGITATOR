@@ -13,6 +13,7 @@
 
 Cogitator is a deterministic evaluation harness. You give it a seed and a run count; it deterministically derives a `case_id`, a difficulty scalar, a score, and a pass/fail for each run, then writes everything to CSV.
 
+
 Same inputs, same output. If the numbers move, something real changed.
 
 ## Output
