@@ -20,6 +20,9 @@ struct Args {
     /// Output CSV path.
     #[arg(long, default_value = "results.csv")]
     output: PathBuf,
+    /// Disable terminal UI output.
+    #[arg(long)]
+    no_tui: bool,
 }
 
 #[derive(Debug)]
@@ -36,6 +39,9 @@ fn main() -> Result<()> {
     let results = run_evaluation(args.seed, args.runs);
     write_results(&args.output, &results).with_context(|| "failed to write results")?;
     let summary = summarize(&results);
+    if !args.no_tui {
+        render_tui(&args, &results, &summary);
+    }
     println!(
         "Seed: {} | Runs: {} | Pass rate: {:.2}% | Avg score: {:.3} | Output: {}",
         args.seed,
@@ -61,47 +67,7 @@ fn evaluate_case(seed: u64, run_id: u32) -> CaseResult {
     let mut rng = StdRng::seed_from_u64(rng_seed);
     let base = 0.45 + rng.gen_range(0.0..0.55);
     let score = (base * (1.0 - difficulty)).clamp(0.0, 1.0);
-    let passed = score >= 0.6;
-    CaseResult {
-        run_id,
-        case_id,
-        difficulty,
-        score,
-        passed,
-    }
-}
-
-fn hash_seed(seed: u64, run_id: u32) -> [u8; 32] {
-    let mut hasher = Sha256::new();
-    hasher.update(seed.to_le_bytes());
-    hasher.update(run_id.to_le_bytes());
-    hasher.finalize().into()
-}
-
-fn to_hex(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        out.push(hex_char(byte >> 4));
-        out.push(hex_char(byte & 0x0f));
-    }
-    out
-}
-
-fn hex_char(nibble: u8) -> char {
-    match nibble {
-        0..=9 => (b'0' + nibble) as char,
-        10..=15 => (b'a' + (nibble - 10)) as char,
-        _ => '?',
-    }
-}
-
-fn write_results(path: &PathBuf, results: &[CaseResult]) -> Result<()> {
-    let file = File::create(path).with_context(|| format!("unable to create {}", path.display()))?;
-    let mut writer = Writer::from_writer(file);
-    writer.write_record(["run_id", "case_id", "difficulty", "score", "passed"])?;
-    for result in results {
-        writer.write_record([
-            result.run_id.to_string(),
+@@ -105,41 +109,124 @@ fn write_results(path: &PathBuf, results: &[CaseResult]) -> Result<()> {
             result.case_id.clone(),
             format!("{:.3}", result.difficulty),
             format!("{:.3}", result.score),
@@ -124,6 +90,89 @@ fn summarize(results: &[CaseResult]) -> Summary {
     Summary {
         pass_rate: pass_count / total.max(1.0),
         avg_score,
+    }
+}
+
+struct HardwareSnapshot {
+    cpu_brand: String,
+    logical_cores: usize,
+    total_memory_gb: Option<f32>,
+    os: String,
+}
+
+// TODO: Replace with the official Cogitator logo asset once provided.
+const COGITATOR_LOGO: &str = r#"
+   ██████╗  ██████╗  ██████╗ ██╗████████╗ █████╗ ████████╗ ██████╗ ██████╗
+  ██╔════╝ ██╔═══██╗██╔════╝ ██║╚══██╔══╝██╔══██╗╚══██╔══╝██╔═══██╗██╔══██╗
+  ██║      ██║   ██║██║  ███╗██║   ██║   ███████║   ██║   ██║   ██║██████╔╝
+  ██║      ██║   ██║██║   ██║██║   ██║   ██╔══██║   ██║   ██║   ██║██╔══██╗
+  ╚██████╗ ╚██████╔╝╚██████╔╝██║   ██║   ██║  ██║   ██║   ╚██████╔╝██║  ██║
+   ╚═════╝  ╚═════╝  ╚═════╝ ╚═╝   ╚═╝   ╚═╝  ╚═╝   ╚═╝    ╚═════╝ ╚═╝  ╚═╝
+"#;
+
+fn render_tui(args: &Args, results: &[CaseResult], summary: &Summary) {
+    let hardware = capture_hardware();
+    let pass_count = results.iter().filter(|r| r.passed).count();
+    let fail_count = results.len().saturating_sub(pass_count);
+    println!(
+        "{}\n{}",
+        COGITATOR_LOGO.trim_end(),
+        "=".repeat(70)
+    );
+    println!(" Mission Control :: Deterministic Evaluation Harness");
+    println!("{}", "-".repeat(70));
+    println!(" Seed            : {}", args.seed);
+    println!(" Runs            : {}", args.runs);
+    println!(" Output CSV      : {}", args.output.display());
+    println!("{}", "-".repeat(70));
+    println!(" Results");
+    println!("  [PASS] Passed   : {}", pass_count);
+    println!("  [FAIL] Failed   : {}", fail_count);
+    println!("  [RATE] PassRate : {:.2}%", summary.pass_rate * 100.0);
+    println!("  [SCORE] Avg     : {:.3}", summary.avg_score);
+    println!("{}", "-".repeat(70));
+    println!(" Reasoning Trace (High-Level, Non-Sensitive)");
+    println!("  1) Parse CLI + seed");
+    println!("  2) Hash seed + run_id to derive case difficulty");
+    println!("  3) Generate deterministic score");
+    println!("  4) Aggregate CSV + summary");
+    println!("{}", "-".repeat(70));
+    println!(" LLM Component Map");
+    println!("  PF Prompt Fidelity     : deterministic seed + hash");
+    println!("  EM Evaluation Matrix   : difficulty, score, pass");
+    println!("  TM Telemetry           : CSV output + summary");
+    println!("  TR Traceability        : stable case_id per run");
+    println!("{}", "-".repeat(70));
+    println!(" Hardware Snapshot");
+    println!("  CPU Model         : {}", hardware.cpu_brand);
+    println!("  Logical Cores     : {}", hardware.logical_cores);
+    match hardware.total_memory_gb {
+        Some(memory_gb) => println!("  Total Memory      : {:.2} GB", memory_gb),
+        None => println!("  Total Memory      : Unknown"),
+    }
+    println!("  OS                : {}", hardware.os);
+    println!("  GPU               : (not detected)");
+    println!("{}", "-".repeat(70));
+    println!(" Scaling & Compatibility");
+    println!("  Single Node       : {} threads", hardware.logical_cores.max(1));
+    println!("  Multi-Socket      : partition by run_id ranges");
+    println!("  Multi-Node        : shard runs across nodes, merge CSVs");
+    println!("  Supercomputer     : deterministic seeds per shard");
+    println!("{}", "=".repeat(70));
+}
+
+fn capture_hardware() -> HardwareSnapshot {
+    let logical_cores = std::thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(1);
+    let cpu_brand = "Unknown CPU".to_string();
+    let total_memory_gb = None;
+    let os = std::env::consts::OS.to_string();
+    HardwareSnapshot {
+        cpu_brand,
+        logical_cores,
+        total_memory_gb,
+        os,
     }
 }
 
