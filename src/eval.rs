@@ -192,6 +192,14 @@ pub fn summarize(results: &[CaseResult]) -> Summary {
     }
 }
 
+/// Structured summary with counts (for analysis bundle)
+pub fn summarize_with_counts(results: &[CaseResult]) -> (Summary, usize, usize) {
+    let summary = summarize(results);
+    let pass_count = results.iter().filter(|r| r.passed).count();
+    let fail_count = results.len().saturating_sub(pass_count);
+    (summary, pass_count, fail_count)
+}
+
 /// Hash seed+run_id → deterministic digest
 fn hash_seed(seed: u64, run_id: u32) -> [u8; 32] {
     let mut hasher = Sha256::new();

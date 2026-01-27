@@ -33,6 +33,28 @@ pub struct Summary {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct ArtifactManifest {
+    pub meta_json: String,
+    pub trace_jsonl: String,
+    pub results_csv: String,
+    pub results_json: String,
+    pub summary_json: String,
+    pub witness_root_txt: String,
+    pub analysis_json: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AnalysisBundle {
+    pub metadata: RunMetadata,
+    pub summary: Summary,
+    pub results: Vec<CaseResult>,
+    pub witness_root: String,
+    pub artifacts: ArtifactManifest,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RunMetadata {
     pub witnessed: WitnessedMetadata,
     pub provenance: ProvenanceMetadata,

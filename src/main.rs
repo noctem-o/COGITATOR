@@ -92,7 +92,7 @@ fn run(args: RunArgs) -> Result<()> {
     };
 
     let output = eval::run_with_trace(args.seed, &run_ids, args.parallel);
-    let summary = eval::summarize(&output.results);
+    let (summary, pass_count, fail_count) = eval::summarize_with_counts(&output.results);
 
     if args.clean && args.out_dir.exists() {
         fs::remove_dir_all(&args.out_dir).with_context(|| "failed to clean output dir")?;
@@ -116,10 +116,44 @@ fn run(args: RunArgs) -> Result<()> {
     let csv_path = args.out_dir.join("results.csv");
     eval::write_results(&csv_path, &output.results)?;
 
+    let results_json_path = args.out_dir.join("results.json");
+    write_json(&results_json_path, &output.results, "results.json")?;
+
+    let summary_json_path = args.out_dir.join("summary.json");
+    write_json(&summary_json_path, &summary, "summary.json")?;
+
+    let manifest = model::ArtifactManifest {
+        meta_json: meta_path.display().to_string(),
+        trace_jsonl: trace_path.display().to_string(),
+        results_csv: csv_path.display().to_string(),
+        results_json: results_json_path.display().to_string(),
+        summary_json: summary_json_path.display().to_string(),
+        witness_root_txt: witness_path.display().to_string(),
+        analysis_json: args.out_dir.join("analysis.json").display().to_string(),
+    };
+
+    let analysis_bundle = model::AnalysisBundle {
+        metadata: metadata.clone(),
+        summary: summary.clone(),
+        results: output.results.clone(),
+        witness_root: witness_root.clone(),
+        artifacts: manifest.clone(),
+    };
+
+    let analysis_path = args.out_dir.join("analysis.json");
+    write_json(&analysis_path, &analysis_bundle, "analysis.json")?;
+
     let tui_enabled = !args.no_tui && cfg!(feature = "tui");
     if tui_enabled {
         #[cfg(feature = "tui")]
-        tui::launch(args.seed, run_ids.len() as u32, &output.results, &summary)?;
+        tui::launch(
+            args.seed,
+            run_ids.len() as u32,
+            &output.results,
+            &summary,
+            &metadata,
+            &manifest,
+        )?;
     } else {
         if !args.no_tui {
             println!("TUI disabled (missing feature).");
@@ -128,6 +162,9 @@ fn run(args: RunArgs) -> Result<()> {
         println!("  meta.json: {}", meta_path.display());
         println!("  trace.jsonl: {}", trace_path.display());
         println!("  results.csv: {}", csv_path.display());
+        println!("  results.json: {}", results_json_path.display());
+        println!("  summary.json: {}", summary_json_path.display());
+        println!("  analysis.json: {}", analysis_path.display());
         println!("  witness_root.txt: {}", witness_path.display());
     }
 
@@ -139,6 +176,10 @@ fn run(args: RunArgs) -> Result<()> {
         summary.avg_score,
         args.out_dir.display(),
         witness_root
+    );
+    println!(
+        "Passed={} Failed={} total_rng_calls={}",
+        pass_count, fail_count, output.total_rng_calls
     );
 
     Ok(())
@@ -183,6 +224,13 @@ fn compute_witness_root(
     }
 
     Ok(witness.finalize_hex())
+}
+
+fn write_json<T: serde::Serialize>(path: &Path, value: &T, label: &str) -> Result<()> {
+    let file = File::create(path).with_context(|| format!("failed to create {}", label))?;
+    serde_json::to_writer_pretty(file, value)
+        .with_context(|| format!("failed to write {}", label))?;
+    Ok(())
 }
 
 fn build_metadata(args: &RunArgs, total_rng_calls: u64, executed_runs: u32) -> model::RunMetadata {
