@@ -5,34 +5,71 @@ use rayon::prelude::*;
 use sha2::{Digest, Sha256};
 use std::path::Path;
 
-use crate::model::{CaseResult, Summary, ThoughtEvent};
+use crate::model::{CaseResult, Summary, ThoughtEvent, TraceEvent, TRACE_SCHEMA_VERSION};
 
-/// Sequential evaluation (deterministic)
-pub fn run_sequential(seed: u64, runs: u32) -> Vec<CaseResult> {
-    (0..runs).map(|id| evaluate_case(seed, id)).collect()
+pub struct RunOutput {
+    pub results: Vec<CaseResult>,
+    pub trace: Vec<TraceEvent>,
+    pub total_rng_calls: u64,
 }
 
-/// Parallel evaluation (deterministic ordering by run_id)
-pub fn run_parallel(seed: u64, runs: u32) -> Vec<CaseResult> {
-    let n = runs as usize;
+struct CaseRun {
+    result: CaseResult,
+    events: Vec<TraceEvent>,
+    rng_calls: u32,
+}
 
-    // Fill by index to guarantee stable ordering regardless of scheduling.
-    let mut out: Vec<Option<CaseResult>> = vec![None; n];
-
-    out.par_iter_mut()
-        .enumerate()
-        .for_each(|(i, slot)| {
-            let run_id = i as u32;
-            *slot = Some(evaluate_case(seed, run_id));
-        });
-
-    out.into_iter()
-        .map(|x| x.expect("slot must be filled"))
+/// Sequential evaluation (deterministic)
+pub fn run_sequential(seed: u64, run_ids: &[u32]) -> Vec<CaseResult> {
+    run_ids
+        .iter()
+        .map(|&id| evaluate_case(seed, id).result)
         .collect()
 }
 
+/// Parallel evaluation (deterministic ordering by run_id)
+pub fn run_parallel(seed: u64, run_ids: &[u32]) -> Vec<CaseResult> {
+    run_with_trace(seed, run_ids, true).results
+}
+
+/// Run evaluation with a canonical trace and entropy accounting.
+pub fn run_with_trace(seed: u64, run_ids: &[u32], parallel: bool) -> RunOutput {
+    let n = run_ids.len();
+    let mut runs: Vec<Option<CaseRun>> = vec![None; n];
+
+    if parallel {
+        runs.par_iter_mut().enumerate().for_each(|(i, slot)| {
+            let run_id = run_ids[i];
+            *slot = Some(evaluate_case(seed, run_id));
+        });
+    } else {
+        for (i, run_id) in run_ids.iter().copied().enumerate() {
+            runs[i] = Some(evaluate_case(seed, run_id));
+        }
+    }
+
+    let mut results = Vec::with_capacity(n);
+    let mut trace = Vec::new();
+    let mut total_rng_calls: u64 = 0;
+
+    for item in runs.into_iter() {
+        let case_run = item.expect("slot must be filled");
+        total_rng_calls += case_run.rng_calls as u64;
+        results.push(case_run.result);
+        trace.extend(case_run.events);
+    }
+
+    trace.sort_by_key(|event| (event.run_id, event.step));
+
+    RunOutput {
+        results,
+        trace,
+        total_rng_calls,
+    }
+}
+
 /// Evaluate one deterministic case
-pub fn evaluate_case(seed: u64, run_id: u32) -> CaseResult {
+fn evaluate_case(seed: u64, run_id: u32) -> CaseRun {
     let digest = hash_seed(seed, run_id);
     let case_id = to_hex(&digest);
 
@@ -41,6 +78,7 @@ pub fn evaluate_case(seed: u64, run_id: u32) -> CaseResult {
 
     let mut rng = StdRng::seed_from_u64(rng_seed);
     let base = 0.45 + rng.gen_range(0.0..0.55);
+    let rng_calls = 1;
 
     let score = (base * (1.0 - difficulty)).clamp(0.0, 1.0);
     let passed = score >= 0.5;
@@ -50,11 +88,15 @@ pub fn evaluate_case(seed: u64, run_id: u32) -> CaseResult {
             step: 0,
             role: "system".into(),
             content: format!("Initializing difficulty {:.2}", difficulty),
+            entropy_bits: 0,
+            rng_calls: 0,
         },
         ThoughtEvent {
             step: 1,
             role: "assistant".into(),
             content: format!("Generated score {:.3}", score),
+            entropy_bits: 32,
+            rng_calls,
         },
         ThoughtEvent {
             step: 2,
@@ -64,16 +106,37 @@ pub fn evaluate_case(seed: u64, run_id: u32) -> CaseResult {
             } else {
                 "Decision: FAIL".into()
             },
+            entropy_bits: 0,
+            rng_calls: 0,
         },
     ];
 
-    CaseResult {
-        run_id,
-        case_id,
-        difficulty,
-        score,
-        passed,
-        thoughts,
+    let events = thoughts
+        .iter()
+        .map(|thought| TraceEvent {
+            schema_version: TRACE_SCHEMA_VERSION,
+            run_id,
+            case_id: case_id.clone(),
+            step: thought.step,
+            role: thought.role.clone(),
+            content: thought.content.clone(),
+            entropy_bits: thought.entropy_bits,
+            rng_calls: thought.rng_calls,
+        })
+        .collect();
+
+    CaseRun {
+        result: CaseResult {
+            run_id,
+            case_id,
+            difficulty,
+            score,
+            passed,
+            rng_calls,
+            thoughts,
+        },
+        events,
+        rng_calls,
     }
 }
 
@@ -81,7 +144,7 @@ pub fn evaluate_case(seed: u64, run_id: u32) -> CaseResult {
 pub fn write_results(path: &Path, results: &[CaseResult]) -> Result<()> {
     let mut writer = Writer::from_path(path).with_context(|| "failed to open CSV output")?;
 
-    writer.write_record(["run_id", "case_id", "difficulty", "score", "passed"])?;
+    writer.write_record(["run_id", "case_id", "difficulty", "score", "passed", "rng_calls"])?;
 
     // Belt-and-suspenders: ensure deterministic CSV row order.
     let mut ordered: Vec<&CaseResult> = results.iter().collect();
@@ -95,6 +158,7 @@ pub fn write_results(path: &Path, results: &[CaseResult]) -> Result<()> {
             format!("{:.6}", r.difficulty),
             format!("{:.6}", r.score),
             r.passed.to_string(),
+            r.rng_calls.to_string(),
         ])?;
     }
 

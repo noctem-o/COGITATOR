@@ -1,25 +1,47 @@
-use anyhow::Result;
-use clap::Parser;
-use std::path::PathBuf;
+use anyhow::{Context, Result};
+use clap::{Args, Parser, Subcommand};
+use std::fs::{self, File};
+use std::io::{BufWriter, Write};
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 mod eval;
 mod model;
+mod trace;
+mod verify;
+mod witness;
 
 #[cfg(feature = "tui")]
 mod tui;
 
-/// CLI arguments
+/// CLI entrypoint
 #[derive(Parser, Debug)]
 #[command(name = "cogitator", version, about = "Deterministic evaluation harness")]
-pub struct Args {
+pub struct Cli {
+    #[command(subcommand)]
+    pub command: CommandLine,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum CommandLine {
+    Run(RunArgs),
+    Verify(VerifyArgs),
+}
+
+/// Run a deterministic evaluation and emit artifacts.
+#[derive(Args, Debug)]
+pub struct RunArgs {
     #[arg(long, default_value_t = 42)]
     pub seed: u64,
 
     #[arg(long, default_value_t = 5000)]
     pub runs: u32,
 
-    #[arg(long, default_value = "results.csv")]
-    pub output: PathBuf,
+    #[arg(long)]
+    pub case: Option<u32>,
+
+    #[arg(long, default_value = "out")]
+    pub out_dir: PathBuf,
 
     #[arg(long)]
     pub no_tui: bool,
@@ -28,34 +50,153 @@ pub struct Args {
     pub parallel: bool,
 }
 
-fn main() -> Result<()> {
-    let args = Args::parse();
+/// Verify a trace against an expected witness root.
+#[derive(Args, Debug)]
+pub struct VerifyArgs {
+    #[arg(long, default_value = "meta.json")]
+    pub meta: PathBuf,
 
-    let results = if args.parallel {
-        eval::run_parallel(args.seed, args.runs)
-    } else {
-        eval::run_sequential(args.seed, args.runs)
+    #[arg(long, default_value = "trace.jsonl")]
+    pub trace: PathBuf,
+
+    #[arg(long)]
+    pub expect: Option<String>,
+
+    #[arg(long)]
+    pub witness: Option<PathBuf>,
+}
+
+fn main() -> Result<()> {
+    let cli = Cli::parse();
+
+    match cli.command {
+        CommandLine::Run(args) => run(args),
+        CommandLine::Verify(args) => verify_cmd(args),
+    }
+}
+
+fn run(args: RunArgs) -> Result<()> {
+    let run_ids: Vec<u32> = match args.case {
+        Some(case_id) => vec![case_id],
+        None => (0..args.runs).collect(),
     };
 
-    eval::write_results(&args.output, &results)?;
-    let summary = eval::summarize(&results);
+    let output = eval::run_with_trace(args.seed, &run_ids, args.parallel);
+    let summary = eval::summarize(&output.results);
+
+    fs::create_dir_all(&args.out_dir).with_context(|| "failed to create output dir")?;
+
+    let metadata = build_metadata(&args, output.total_rng_calls, run_ids.len() as u32);
+    let metadata_bytes = trace::encode_metadata(&metadata)?;
+    let meta_path = args.out_dir.join("meta.json");
+    fs::write(&meta_path, &metadata_bytes).with_context(|| "failed to write meta.json")?;
+
+    let trace_path = args.out_dir.join("trace.jsonl");
+    write_trace(&trace_path, &output.trace)?;
+
+    let witness_root = compute_witness_root(&metadata_bytes, &output.trace)?;
+    let witness_path = args.out_dir.join("witness_root.txt");
+    fs::write(&witness_path, format!("{}\n", witness_root))
+        .with_context(|| "failed to write witness_root.txt")?;
+
+    let csv_path = args.out_dir.join("results.csv");
+    eval::write_results(&csv_path, &output.results)?;
 
     if !args.no_tui {
         #[cfg(feature = "tui")]
-        tui::launch(args.seed, args.runs, &results, &summary)?;
+        tui::launch(args.seed, run_ids.len() as u32, &output.results, &summary)?;
 
         #[cfg(not(feature = "tui"))]
         println!("TUI disabled (missing feature).");
     }
 
     println!(
-        "Seed={} Runs={} PassRate={:.2}% AvgScore={:.3} Output={}",
+        "Seed={} Runs={} PassRate={:.2}% AvgScore={:.3} OutputDir={} WitnessRoot={}",
         args.seed,
-        args.runs,
+        run_ids.len(),
         summary.pass_rate * 100.0,
         summary.avg_score,
-        args.output.display()
+        args.out_dir.display(),
+        witness_root
     );
 
     Ok(())
+}
+
+fn verify_cmd(args: VerifyArgs) -> Result<()> {
+    let expect = match (args.expect, args.witness) {
+        (Some(expect), _) => expect,
+        (None, Some(path)) => read_trimmed(&path)?,
+        (None, None) => anyhow::bail!("--expect or --witness is required"),
+    };
+
+    let computed = verify::verify(&args.meta, &args.trace, &expect)?;
+    println!("Verified witness_root={}", computed);
+    Ok(())
+}
+
+fn write_trace(path: &Path, events: &[model::TraceEvent]) -> Result<()> {
+    let file = File::create(path).with_context(|| "failed to create trace.jsonl")?;
+    let mut writer = BufWriter::new(file);
+
+    for event in events {
+        let bytes = trace::encode_event(event)?;
+        writer.write_all(&bytes)?;
+        writer.write_all(b"\n")?;
+    }
+
+    writer.flush()?;
+    Ok(())
+}
+
+fn compute_witness_root(metadata_bytes: &[u8], events: &[model::TraceEvent]) -> Result<String> {
+    let mut witness = witness::Witness::new(metadata_bytes)?;
+
+    for event in events {
+        let event_bytes = trace::encode_event(event)?;
+        witness.update(&event_bytes)?;
+    }
+
+    Ok(witness.finalize_hex())
+}
+
+fn build_metadata(args: &RunArgs, total_rng_calls: u64, runs: u32) -> model::RunMetadata {
+    model::RunMetadata {
+        schema_version: model::TRACE_SCHEMA_VERSION,
+        seed: args.seed,
+        runs,
+        parallel: args.parallel,
+        case_filter: args.case,
+        created_at: chrono::Utc::now().to_rfc3339(),
+        git_rev: git_rev(),
+        rustc_version: command_version("rustc"),
+        cargo_version: command_version("cargo"),
+        nix_store_path: std::env::var("NIX_STORE").ok(),
+        entropy_sources: vec!["rng".to_string()],
+        total_rng_calls,
+    }
+}
+
+fn git_rev() -> Option<String> {
+    let output = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn command_version(command: &str) -> Option<String> {
+    let output = Command::new(command).arg("-V").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn read_trimmed(path: &Path) -> Result<String> {
+    let content = fs::read_to_string(path).with_context(|| "failed to read witness file")?;
+    Ok(content.trim().to_string())
 }
