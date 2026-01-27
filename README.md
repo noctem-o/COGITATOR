@@ -45,7 +45,10 @@
 +- `difficulty`
 +- `score`
 +- `passed`
-Cogitator is a deterministic evaluation harness for agent-style workflows. It runs seeded evaluations, writes results to CSV, and can print a compact terminal UI that summarizes run health, telemetry, and hardware context.
+
+Cogitator is a deterministic evaluation harness for agent-style workflows. It runs seeded evaluations, writes results to CSV.
+It runs seeded evaluations, writes results to CSV, and can print a compact terminal UI that summarizes run health, telemetry, and hardware
+context.
 
 ## Features
 
