@@ -10,45 +10,7 @@
    ╚═════╝  ╚═════╝  ╚═════╝ ╚═╝   ╚═╝   ╚═╝  ╚═╝   ╚═╝    ╚═════╝ ╚═╝  ╚═╝
 
 
-# Cogitator
- 
- Deterministic evaluation harness for autonomous security agents.
- 
- ## Reproducibility
- 
- ```bash
- cargo build --release --locked
--./repro.sh --seed 42 --runs 5000
-+./repro.sh --seed 42 --runs 5000 --output results.csv
-+```
- 
-+## Usage
-+
-+Run the harness directly:
-+
-+```bash
-+cargo run --release -- --seed 42 --runs 5000 --output results.csv
-+```
-+
-+The CLI flags:
-+
-+- `--seed`: deterministic seed for generating runs.
-+- `--runs`: number of evaluation runs to simulate.
-+- `--output`: path to write the CSV results (default: `results.csv`).
-+
-+## Output
-+
-+The CSV contains one row per run with the following columns:
-+
-+- `run_id`
-+- `case_id`
-+- `difficulty`
-+- `score`
-+- `passed`
-
-Cogitator is a deterministic evaluation harness for agent-style workflows. It runs seeded evaluations, writes results to CSV.
-It runs seeded evaluations, writes results to CSV, and can print a compact terminal UI that summarizes run health, telemetry, and hardware
-context.
+Cogitator is a deterministic evaluation harness for agent-style workflows. It runs seeded evaluations, writes results to CSV, and can print a compact terminal UI that summarizes run health, telemetry, and hardware context.
 
 ## Features
 
