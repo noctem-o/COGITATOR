@@ -10,113 +10,91 @@
    ╚═════╝  ╚═════╝  ╚═════╝ ╚═╝   ╚═╝   ╚═╝  ╚═╝   ╚═╝    ╚═════╝ ╚═╝  ╚═╝
 
 
+# Cogitator
+ 
+ Deterministic evaluation harness for autonomous security agents.
+ 
+ ## Reproducibility
+ 
+ ```bash
+ cargo build --release --locked
+-./repro.sh --seed 42 --runs 5000
++./repro.sh --seed 42 --runs 5000 --output results.csv
++```
+ 
++## Usage
++
++Run the harness directly:
++
++```bash
++cargo run --release -- --seed 42 --runs 5000 --output results.csv
++```
++
++The CLI flags:
++
++- `--seed`: deterministic seed for generating runs.
++- `--runs`: number of evaluation runs to simulate.
++- `--output`: path to write the CSV results (default: `results.csv`).
++
++## Output
++
++The CSV contains one row per run with the following columns:
++
++- `run_id`
++- `case_id`
++- `difficulty`
++- `score`
++- `passed`
+Cogitator is a deterministic evaluation harness for agent-style workflows. It runs seeded evaluations, writes results to CSV, and can print a compact terminal UI that summarizes run health, telemetry, and hardware context.
 
-Cogitator is a deterministic evaluation harness. You give it a seed and a run count; it deterministically derives a `case_id`, a difficulty scalar, a score, and a pass/fail for each run, then writes everything to CSV.
+## Features
 
+- Deterministic case generation and scoring from a seed + run id.
+- CSV output for downstream analysis.
+- Optional terminal UI with:
+  - High‑level, non‑sensitive thought telemetry.
+  - Aggregate metrics (range, median/P90, volatility, correlation, entropy).
+  - Hardware snapshot (CPU, memory, OS, accelerator hints).
+  - Local config signals (NixOS, Home Manager, Hyprland) when present.
 
-Same inputs, same output. If the numbers move, something real changed.
+## Usage
+
+Build and run:
+
+```bash
+cargo run --release -- --seed 42 --runs 5000 --output results.csv
+```
+
+Disable the terminal UI (e.g., for scripted runs):
+
+```bash
+cargo run --release -- --no-tui
+```
+
+## CLI Options
+
+- `--seed <u64>`: Seed for deterministic evaluation (default: `42`).
+- `--runs <u32>`: Number of evaluation runs (default: `5000`).
+- `--output <path>`: CSV output path (default: `results.csv`).
+- `--no-tui`: Disable terminal UI output.
 
 ## Output
 
-Each run generates:
+The CSV contains the following columns:
 
-- `case_id`: stable ID derived from `SHA-256(seed, run_id)` (hex)
-- `difficulty`: derived scalar from the digest
-- `score`: deterministic score in `[0, 1]`
-- `passed`: deterministic pass/fail flag
-- `results.csv`: easy to diff, plot, or feed into a pipeline
+- `run_id`
+- `case_id`
+- `difficulty`
+- `score`
+- `passed`
 
-The terminal UI can be disabled for CI with `--no-tui`.
+The terminal UI prints a summary table and supporting telemetry; it avoids emitting sensitive chain-of-thought and stays at a high level.
 
-## Build
+## Notes
 
-```bash
-cargo build --release
+- Hardware detection is best‑effort and intentionally lightweight to preserve portability.
+- Config signal checks only report file existence and size, not contents.
 
-Run
-
-Defaults: --seed 42 --runs 5000 --output results.csv
-
-cargo run --release
-
-Explicit parameters:
-
-cargo run --release -- --seed 1337 --runs 10000 --output results.csv
-
-Disable the terminal UI:
-
-cargo run --release -- --no-tui
-
-CLI
-
-cogitator [OPTIONS]
-
-Options:
-      --seed <SEED>        Seed for deterministic evaluation [default: 42]
-      --runs <RUNS>        Number of evaluation runs [default: 5000]
-      --output <OUTPUT>    Output CSV path [default: results.csv]
-      --no-tui             Disable terminal UI output
-  -h, --help               Print help
-  -V, --version            Print version
-
-CSV format
-
-Columns:
-
-    run_id (u32): run index 0..runs-1
-
-    case_id (string): stable per (seed, run_id)
-
-    difficulty (float): digest[0] / 255.0
-
-    score (float): deterministic scalar in [0, 1]
-
-    passed (bool): deterministic pass/fail
-
-Example:
-
-run_id,case_id,difficulty,score,passed
-0,9f2a...e41c,0.125,0.731,true
-
-How determinism works
-
-High level:
-
-    Parse CLI args (seed, runs, output, no_tui)
-
-    For each run_id:
-
-        compute digest = SHA256(seed, run_id)
-
-        case_id = hex(digest)
-
-        difficulty = digest[0] / 255
-
-        derive RNG seed from digest[0..8]
-
-        compute score and passed deterministically
-
-    Write CSV telemetry and print a summary (and the TUI, unless disabled)
-
-The important part is that all randomness comes from a seed derived from the hash, not from ambient entropy.
-
-Tests
-
-cargo test
-
-There’s a determinism test that runs the harness twice with the same seed and checks that case IDs, scores, and pass/fail match.
-Extending it
-
-This is meant to be a harness, not a full evaluation suite. Typical next steps:
-
-    Replace evaluate_case() with your real task runner and scoring logic.
-
-    Keep case_id stable so results remain comparable across versions.
-
-    Add more telemetry if you need it (JSONL, traces, histograms).
-
-    Improve capture_hardware() if you want richer environment reporting (CPU brand, RAM, GPU, kernel, etc.). Just don’t let hardware data influence scoring unless you explicitly want that.
-
-License
+## License
 
 MIT / Apache-2.0
