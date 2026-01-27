@@ -1,23 +1,33 @@
 use anyhow::{Context, Result};
 use csv::Writer;
 use rand::{rngs::StdRng, Rng, SeedableRng};
-use sha2::{Digest, Sha256};
-use std::path::PathBuf;
-
 use rayon::prelude::*;
+use sha2::{Digest, Sha256};
+use std::path::Path;
 
 use crate::model::{CaseResult, Summary, ThoughtEvent};
 
-/// Sequential evaluation
+/// Sequential evaluation (deterministic)
 pub fn run_sequential(seed: u64, runs: u32) -> Vec<CaseResult> {
     (0..runs).map(|id| evaluate_case(seed, id)).collect()
 }
 
-/// Parallel evaluation
+/// Parallel evaluation (deterministic ordering by run_id)
 pub fn run_parallel(seed: u64, runs: u32) -> Vec<CaseResult> {
-    (0..runs)
-        .into_par_iter()
-        .map(|id| evaluate_case(seed, id))
+    let n = runs as usize;
+
+    // Fill by index to guarantee stable ordering regardless of scheduling.
+    let mut out: Vec<Option<CaseResult>> = vec![None; n];
+
+    out.par_iter_mut()
+        .enumerate()
+        .for_each(|(i, slot)| {
+            let run_id = i as u32;
+            *slot = Some(evaluate_case(seed, run_id));
+        });
+
+    out.into_iter()
+        .map(|x| x.expect("slot must be filled"))
         .collect()
 }
 
@@ -67,18 +77,23 @@ pub fn evaluate_case(seed: u64, run_id: u32) -> CaseResult {
     }
 }
 
-/// Write CSV results
-pub fn write_results(path: &PathBuf, results: &[CaseResult]) -> Result<()> {
+/// Write CSV results (stable ordering + ergonomic Path API)
+pub fn write_results(path: &Path, results: &[CaseResult]) -> Result<()> {
     let mut writer = Writer::from_path(path).with_context(|| "failed to open CSV output")?;
 
     writer.write_record(["run_id", "case_id", "difficulty", "score", "passed"])?;
 
-    for r in results {
+    // Belt-and-suspenders: ensure deterministic CSV row order.
+    let mut ordered: Vec<&CaseResult> = results.iter().collect();
+    ordered.sort_by_key(|r| r.run_id);
+
+    for r in ordered {
         writer.write_record([
             r.run_id.to_string(),
             r.case_id.clone(),
-            format!("{:.3}", r.difficulty),
-            format!("{:.3}", r.score),
+            // More precision makes diffs and downstream math less cursed.
+            format!("{:.6}", r.difficulty),
+            format!("{:.6}", r.score),
             r.passed.to_string(),
         ])?;
     }
@@ -87,16 +102,22 @@ pub fn write_results(path: &PathBuf, results: &[CaseResult]) -> Result<()> {
     Ok(())
 }
 
-/// Summary statistics
+/// Summary statistics (stable + less float wobble)
 pub fn summarize(results: &[CaseResult]) -> Summary {
-    let total = results.len() as f32;
-    let pass = results.iter().filter(|r| r.passed).count() as f32;
+    let total = results.len() as f64;
+    if total == 0.0 {
+        return Summary {
+            pass_rate: 0.0,
+            avg_score: 0.0,
+        };
+    }
 
-    let avg = results.iter().map(|r| r.score).sum::<f32>() / total.max(1.0);
+    let pass = results.iter().filter(|r| r.passed).count() as f64;
+    let avg = results.iter().map(|r| r.score as f64).sum::<f64>() / total;
 
     Summary {
-        pass_rate: pass / total.max(1.0),
-        avg_score: avg,
+        pass_rate: (pass / total) as f32,
+        avg_score: avg as f32,
     }
 }
 
