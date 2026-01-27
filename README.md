@@ -7,7 +7,6 @@
    ╚═════╝  ╚═════╝  ╚═════╝ ╚═╝   ╚═╝   ╚═╝  ╚═╝   ╚═╝    ╚═════╝ ╚═╝  ╚═╝
 
 
-# Cogitator
 
 Cogitator is a deterministic execution  
 and witnessed-telemetry framework  
