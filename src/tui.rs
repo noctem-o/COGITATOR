@@ -2,7 +2,7 @@
 use anyhow::{Context, Result};
 
 #[cfg(feature = "tui")]
-use crate::model::{CaseResult, Summary};
+use crate::model::{ArtifactManifest, CaseResult, RunMetadata, Summary};
 
 #[cfg(feature = "tui")]
 use crossterm::{
@@ -18,7 +18,14 @@ use ratatui::{
 };
 
 #[cfg(feature = "tui")]
-pub fn launch(seed: u64, runs: u32, results: &[CaseResult], summary: &Summary) -> Result<()> {
+pub fn launch(
+    seed: u64,
+    runs: u32,
+    results: &[CaseResult],
+    summary: &Summary,
+    metadata: &RunMetadata,
+    manifest: &ArtifactManifest,
+) -> Result<()> {
     enable_raw_mode().context("enable raw mode")?;
     let mut stdout = std::io::stdout();
     execute!(stdout, EnterAlternateScreen).context("enter alternate screen")?;
@@ -30,6 +37,7 @@ pub fn launch(seed: u64, runs: u32, results: &[CaseResult], summary: &Summary) -
 
     let pass_count = results.iter().filter(|result| result.passed).count();
     let fail_count = results.len().saturating_sub(pass_count);
+    let entropy_sources = metadata.witnessed.entropy_sources.join(", ");
 
     loop {
         terminal.draw(|frame| {
@@ -39,8 +47,8 @@ pub fn launch(seed: u64, runs: u32, results: &[CaseResult], summary: &Summary) -
                 .margin(2)
                 .constraints([
                     Constraint::Length(3),
-                    Constraint::Min(6),
-                    Constraint::Length(3),
+                    Constraint::Min(10),
+                    Constraint::Length(7),
                 ])
                 .split(size);
 
@@ -59,6 +67,18 @@ pub fn launch(seed: u64, runs: u32, results: &[CaseResult], summary: &Summary) -
                 Line::from(format!("Pass rate: {:.2}%", summary.pass_rate * 100.0)),
                 Line::from(format!("Average score: {:.3}", summary.avg_score)),
                 Line::from(format!("Passed: {}  Failed: {}", pass_count, fail_count)),
+                Line::from(format!(
+                    "Entropy sources: {}",
+                    if entropy_sources.is_empty() {
+                        "none declared".to_string()
+                    } else {
+                        entropy_sources.clone()
+                    }
+                )),
+                Line::from(format!(
+                    "Trace schema: v{}  |  Parallel: {}",
+                    metadata.witnessed.schema_version, metadata.witnessed.parallel
+                )),
                 Line::from(""),
                 Line::from(match pr_url.as_deref() {
                     Some(url) => format!("Pull request: {}", url),
@@ -78,10 +98,24 @@ pub fn launch(seed: u64, runs: u32, results: &[CaseResult], summary: &Summary) -
                 .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
                 .split(layout[2]);
 
-            let ask_button = Block::default()
-                .borders(Borders::ALL)
-                .title("Ask for changes");
-            frame.render_widget(ask_button, button_layout[0]);
+            let artifact_text = vec![
+                Line::from("Artifacts:"),
+                Line::from(format!("meta.json → {}", manifest.meta_json)),
+                Line::from(format!("trace.jsonl → {}", manifest.trace_jsonl)),
+                Line::from(format!("results.csv → {}", manifest.results_csv)),
+                Line::from(format!("results.json → {}", manifest.results_json)),
+                Line::from(format!("summary.json → {}", manifest.summary_json)),
+                Line::from(format!("analysis.json → {}", manifest.analysis_json)),
+                Line::from(format!("witness_root.txt → {}", manifest.witness_root_txt)),
+            ];
+            let artifact_block = Paragraph::new(artifact_text)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("Artifact bundle"),
+                )
+                .wrap(Wrap { trim: true });
+            frame.render_widget(artifact_block, button_layout[0]);
 
             let view_pr_title = if pr_url.is_some() {
                 "View PR"
