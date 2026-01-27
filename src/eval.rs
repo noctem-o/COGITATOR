@@ -59,6 +59,8 @@ pub fn run_with_trace(seed: u64, run_ids: &[u32], parallel: bool) -> RunOutput {
         trace.extend(case_run.events);
     }
 
+    trace.sort_by_key(|event| (event.run_id, event.step));
+
     RunOutput {
         results,
         trace,
@@ -114,6 +116,7 @@ fn evaluate_case(seed: u64, run_id: u32) -> CaseRun {
         .map(|thought| TraceEvent {
             schema_version: TRACE_SCHEMA_VERSION,
             run_id,
+            case_id: case_id.clone(),
             step: thought.step,
             role: thought.role.clone(),
             content: thought.content.clone(),

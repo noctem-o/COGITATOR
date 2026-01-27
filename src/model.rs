@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-pub const TRACE_SCHEMA_VERSION: u32 = 1;
+pub const TRACE_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThoughtEvent {
@@ -48,6 +48,7 @@ pub struct RunMetadata {
 pub struct TraceEvent {
     pub schema_version: u32,
     pub run_id: u32,
+    pub case_id: String,
     pub step: u32,
     pub role: String,
     pub content: String,
