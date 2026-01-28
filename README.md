@@ -20,6 +20,9 @@ recompute the same witness root from the same inputs and environment.
 - **Witness roots** (BLAKE3) that commit to every event in a run’s trace.
 - **Deterministic agent mode** with tool transcript recording + replay for byte-stable
   re-execution.
+- **Optional LLM-as-tool integration**: LLM inference is just another tool call. Live mode
+  records responses into the transcript; replay reuses them. The default stub backend is
+  fully offline and requires no model installation.
 - **Drift detection** that compares replayed tool calls against recorded transcripts and
   emits machine-readable drift reports.
 - **Witness bundles** that package agent traces, tool transcripts, hash chains, and
@@ -143,6 +146,16 @@ step-by-step provenance for drift analysis.
 
 Replay reuses the prior tool transcript and emits a drift report showing any deviations.
 Replay is transcript playback only; deterministic chaos is not re-run during replay.
+
+### Optional LLM tool (stubbed by default)
+
+LLM calls are treated as tool invocations so their responses are recorded during live
+runs and replayed verbatim during replays. By default, Cogitator uses a deterministic
+stub backend and requires no model installation.
+
+```bash
+./target/debug/cogitator run --agent clawdbot --runs 1 --llm on --llm-model stub --out-dir out
+```
 
 ### Verify witness roots
 

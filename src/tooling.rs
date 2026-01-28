@@ -5,6 +5,8 @@ use std::path::Path;
 
 use crate::canonical_json;
 use crate::chaos::{apply_fault, ChaosEngine, FaultRecord};
+use crate::llm;
+use crate::llm::LlmBackend;
 use crate::report::DriftIssue;
 
 pub const TOOL_TRANSCRIPT_SCHEMA_VERSION: u32 = 2;
@@ -100,14 +102,19 @@ impl ToolTranscript {
         self.next_call_idx = self.next_call_idx.saturating_add(1);
         match self.mode {
             ToolMode::Live => {
-                let mut response = stub_response(&request);
+                let mut response = if request.tool_name == llm::LlmRequest::tool_name() {
+                    llm_live_response(&request).unwrap_or_else(|| stub_response(&request))
+                } else {
+                    stub_response(&request)
+                };
                 let fault = if let Some(chaos) = &self.chaos {
                     chaos.decide_fault(step, tool_call_idx, &request.tool_name)
                 } else {
                     None
                 };
                 if let Some(fault_record) = fault.as_ref() {
-                    response = apply_fault(&request, response, fault_record).unwrap_or(response);
+                    let original = response.clone();
+                    response = apply_fault(&request, response, fault_record).unwrap_or(original);
                 }
                 self.recorded.push(ToolCall {
                     step,
@@ -219,4 +226,17 @@ fn hex_string(bytes: &[u8]) -> String {
         out.push_str(&format!("{:02x}", byte));
     }
     out
+}
+
+fn llm_live_response(request: &ToolRequest) -> Option<ToolResponse> {
+    let parsed = llm::parse_tool_request(request).ok()?;
+    let backend = llm::StubLlmBackend;
+    let response = backend.generate(&parsed).ok()?;
+    let output = llm::response_to_tool_output(&response).ok()?;
+    Some(ToolResponse {
+        tool_name: request.tool_name.clone(),
+        output,
+        success: true,
+        simulated_latency_ms: None,
+    })
 }

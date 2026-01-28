@@ -13,6 +13,7 @@ mod canonical_json;
 mod chaos;
 mod drift;
 mod eval;
+mod llm;
 mod model;
 mod nix_provenance;
 mod report;
@@ -43,17 +44,23 @@ pub enum CommandLine {
     Demo(DemoArgs),
 }
 
-#[derive(ValueEnum, Clone, Debug)]
+#[derive(ValueEnum, Clone, Debug, PartialEq, Eq)]
 pub enum FaultToggle {
     On,
     Off,
 }
 
-#[derive(ValueEnum, Clone, Debug)]
+#[derive(ValueEnum, Clone, Debug, PartialEq, Eq)]
 pub enum FaultProfile {
     None,
     Ci,
     Stress,
+}
+
+#[derive(ValueEnum, Clone, Debug, PartialEq, Eq)]
+pub enum LlmToggle {
+    On,
+    Off,
 }
 
 #[derive(Subcommand, Debug)]
@@ -143,6 +150,15 @@ pub struct RunArgs {
     #[arg(long, help = "Agent/replay only")]
     pub fault_latency_rate: Option<f64>,
 
+    #[arg(long, default_value = "off", value_enum, help = "Agent/replay only")]
+    pub llm: LlmToggle,
+
+    #[arg(long, default_value = "stub", help = "Agent/replay only")]
+    pub llm_model: String,
+
+    #[arg(long, help = "Agent/replay only")]
+    pub llm_seed: Option<u64>,
+
     #[arg(
         long,
         default_value = "auto",
@@ -192,10 +208,11 @@ fn run(args: RunArgs) -> Result<()> {
         || args.fault_corrupt_rate.is_some()
         || args.fault_drop_rate.is_some()
         || args.fault_latency_rate.is_some()
+        || args.llm != LlmToggle::Off
+        || args.llm_model != "stub"
+        || args.llm_seed.is_some()
     {
-        anyhow::bail!(
-            "fault injection flags are only supported in agent mode (--agent or --replay)"
-        );
+        anyhow::bail!("agent-only flags are only supported in agent mode (--agent or --replay)");
     }
 
     let run_ids: Vec<u32> = match args.case {
@@ -588,7 +605,12 @@ fn run_agent(args: RunArgs) -> Result<()> {
                 tooling::ToolTranscript::new_live(chaos_engine)
             };
 
-            let mut agent = agent::ClawdbotAgent::new(args.seed);
+            let llm_config = agent::LlmConfig {
+                enabled: matches!(args.llm, LlmToggle::On),
+                model: args.llm_model.clone(),
+                seed: args.llm_seed,
+            };
+            let mut agent = agent::ClawdbotAgent::new(args.seed, llm_config);
             let mut agent_trace = Vec::new();
             let mut prior_outputs = Vec::new();
 
@@ -1008,6 +1030,9 @@ fn run_demo_agent(
             fault_corrupt_rate: None,
             fault_drop_rate: None,
             fault_latency_rate: None,
+            llm: LlmToggle::Off,
+            llm_model: "stub".to_string(),
+            llm_seed: None,
             nix_provenance: nix_provenance::NixProvenanceMode::Off,
         },
         0,
@@ -1021,7 +1046,7 @@ fn run_demo_agent(
         None
     };
     let mut tool_transcript = tooling::ToolTranscript::new_live(chaos_engine);
-    let mut agent = agent::ClawdbotAgent::new(seed);
+    let mut agent = agent::ClawdbotAgent::new(seed, agent::LlmConfig::default());
     let mut agent_trace = Vec::new();
     let mut prior_outputs = Vec::new();
 

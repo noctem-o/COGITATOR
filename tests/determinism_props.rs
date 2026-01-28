@@ -1,12 +1,13 @@
 use proptest::prelude::*;
 use rayon::ThreadPoolBuilder;
 
-use cogitator::agent::AgentTraceEntry;
+use cogitator::agent::{Agent, AgentTraceEntry};
 use cogitator::chaos::{
     ChaosEngine, ChaosProfile, FaultRates, CHAOS_PROFILE_SCHEMA_VERSION, CHAOS_SCHEDULE_VERSION,
 };
 use cogitator::drift;
 use cogitator::eval;
+use cogitator::llm;
 use cogitator::model::{ChaosProfileSummary, WitnessedMetadata, TRACE_SCHEMA_VERSION};
 use cogitator::report::DriftIssue;
 use cogitator::tooling::{
@@ -36,6 +37,29 @@ fn witness_root_for_agent(
 ) -> String {
     trace::compute_agent_witness_root(metadata, agent_trace, tool_calls)
         .expect("agent witness root")
+}
+
+fn llm_agent_trace(seed: u64) -> Vec<AgentTraceEntry> {
+    let llm_request = llm::LlmRequest {
+        schema_version: llm::LLM_REQUEST_SCHEMA_VERSION,
+        model: "stub".to_string(),
+        messages: vec![llm::LlmMessage {
+            role: "user".to_string(),
+            content: "hello".to_string(),
+        }],
+        temperature: None,
+        max_tokens: None,
+        seed: Some(seed),
+    };
+    let tool_request = llm::make_tool_request(&llm_request).expect("llm tool request");
+    vec![AgentTraceEntry {
+        step: 0,
+        role: "assistant".to_string(),
+        thought: "query".to_string(),
+        action: "llm".to_string(),
+        tool_requests: vec![tool_request],
+        is_final: true,
+    }]
 }
 
 proptest! {
@@ -206,10 +230,11 @@ proptest! {
         };
 
         let report = drift::detect_transcript_drift(&expected, &actual);
-        prop_assert!(report
+        let mismatch = report
             .issues
             .iter()
-            .any(|issue| matches!(issue, DriftIssue::ToolRequestMismatch { .. })));
+            .any(|issue| matches!(issue, DriftIssue::ToolRequestMismatch { .. }));
+        prop_assert!(mismatch);
     }
 }
 
@@ -271,6 +296,94 @@ fn witness_root_sorts_tool_calls_by_index() {
     let root_sorted = witness_root_for_agent(&metadata, &agent_trace, &[call_b, call_a]);
 
     assert_eq!(root_unsorted, root_sorted);
+}
+
+#[test]
+fn llm_stub_record_replay_deterministic() {
+    let seed = 7u64;
+    let metadata = WitnessedMetadata {
+        schema_version: TRACE_SCHEMA_VERSION,
+        seed,
+        requested_runs: 1,
+        executed_runs: 1,
+        parallel: false,
+        parallel_strategy: "sequential".to_string(),
+        case_filter: Some(0),
+        entropy_sources: vec![
+            "rng:StdRng(seed)".to_string(),
+            "tooling:stubbed-or-replay".to_string(),
+        ],
+        total_rng_calls: 0,
+        chaos_profile: None,
+    };
+
+    let agent_trace = llm_agent_trace(seed);
+
+    let mut live_transcript = ToolTranscript::new_live(None);
+    for entry in &agent_trace {
+        for request in entry.tool_requests.clone() {
+            live_transcript.execute(entry.step, request);
+        }
+    }
+    let live_record = live_transcript.into_record();
+
+    let mut replay_transcript = ToolTranscript::new_replay(live_record.clone());
+    for entry in &agent_trace {
+        for request in entry.tool_requests.clone() {
+            replay_transcript.execute(entry.step, request);
+        }
+    }
+    let replay_record = replay_transcript.into_record();
+
+    let live_root = witness_root_for_agent(&metadata, &agent_trace, &live_record.entries);
+    let replay_root = witness_root_for_agent(&metadata, &agent_trace, &replay_record.entries);
+    assert_eq!(live_root, replay_root);
+
+    let drift_report = drift::detect_transcript_drift(&live_record, &replay_record);
+    assert!(!drift_report.drifted, "drifted: {:?}", drift_report.issues);
+}
+
+#[test]
+fn llm_stub_thread_invariance() {
+    let seed = 9u64;
+    let metadata = WitnessedMetadata {
+        schema_version: TRACE_SCHEMA_VERSION,
+        seed,
+        requested_runs: 1,
+        executed_runs: 1,
+        parallel: false,
+        parallel_strategy: "sequential".to_string(),
+        case_filter: Some(0),
+        entropy_sources: vec![
+            "rng:StdRng(seed)".to_string(),
+            "tooling:stubbed-or-replay".to_string(),
+        ],
+        total_rng_calls: 0,
+        chaos_profile: None,
+    };
+
+    let roots: Vec<String> = [1usize, 4]
+        .iter()
+        .map(|threads| {
+            ThreadPoolBuilder::new()
+                .num_threads(*threads)
+                .build()
+                .unwrap()
+                .install(|| {
+                    let agent_trace = llm_agent_trace(seed);
+                    let mut transcript = ToolTranscript::new_live(None);
+                    for entry in &agent_trace {
+                        for request in entry.tool_requests.clone() {
+                            transcript.execute(entry.step, request);
+                        }
+                    }
+                    let record = transcript.into_record();
+                    witness_root_for_agent(&metadata, &agent_trace, &record.entries)
+                })
+        })
+        .collect();
+
+    assert!(roots.iter().all(|root| root == &roots[0]));
 }
 
 #[test]
@@ -336,7 +449,10 @@ fn agent_witness_root_invariant_across_thread_counts() {
                         chaos_profile: None,
                     };
 
-                    let mut agent = cogitator::agent::ClawdbotAgent::new(13);
+                    let mut agent = cogitator::agent::ClawdbotAgent::new(
+                        13,
+                        cogitator::agent::LlmConfig::default(),
+                    );
                     let mut agent_trace = Vec::new();
                     let mut transcript = ToolTranscript::new_live(None);
                     let mut prior_outputs = Vec::new();
