@@ -8,11 +8,13 @@ use cogitator::chaos::{
 use cogitator::drift;
 use cogitator::eval;
 use cogitator::model::{ChaosProfileSummary, WitnessedMetadata, TRACE_SCHEMA_VERSION};
+use cogitator::report::DriftIssue;
 use cogitator::tooling::{
     ToolCall, ToolMode, ToolRequest, ToolResponse, ToolTranscript, ToolTranscriptRecord,
     TOOL_TRANSCRIPT_SCHEMA_VERSION,
 };
-use cogitator::{trace, witness};
+use cogitator::trace;
+use cogitator::witness;
 
 fn witness_root_for_trace(
     metadata: &WitnessedMetadata,
@@ -32,17 +34,8 @@ fn witness_root_for_agent(
     agent_trace: &[AgentTraceEntry],
     tool_calls: &[ToolCall],
 ) -> String {
-    let metadata_bytes = trace::encode_witnessed_metadata(metadata).expect("metadata bytes");
-    let mut w = witness::Witness::new(&metadata_bytes).expect("witness");
-    for entry in agent_trace {
-        let bytes = trace::encode_agent_trace_entry(entry).expect("agent trace bytes");
-        w.update(&bytes).expect("update witness");
-        for call in tool_calls.iter().filter(|call| call.step == entry.step) {
-            let call_bytes = trace::encode_tool_call(call).expect("tool call bytes");
-            w.update(&call_bytes).expect("update witness");
-        }
-    }
-    w.finalize_hex()
+    trace::compute_agent_witness_root(metadata, agent_trace, tool_calls)
+        .expect("agent witness root")
 }
 
 proptest! {
@@ -216,6 +209,163 @@ proptest! {
         prop_assert!(report
             .issues
             .iter()
-            .any(|issue| issue.contains("tool request mismatch")));
+            .any(|issue| matches!(issue, DriftIssue::ToolRequestMismatch { .. })));
     }
+}
+
+#[test]
+fn witness_root_sorts_tool_calls_by_index() {
+    let metadata = WitnessedMetadata {
+        schema_version: TRACE_SCHEMA_VERSION,
+        seed: 7,
+        requested_runs: 1,
+        executed_runs: 1,
+        parallel: false,
+        parallel_strategy: "sequential".to_string(),
+        case_filter: None,
+        entropy_sources: vec![],
+        total_rng_calls: 0,
+        chaos_profile: None,
+    };
+
+    let agent_trace = vec![AgentTraceEntry {
+        step: 0,
+        role: "assistant".to_string(),
+        thought: "probe".to_string(),
+        action: "lookup".to_string(),
+        tool_requests: vec![],
+        is_final: false,
+    }];
+
+    let response = ToolResponse {
+        tool_name: "clawdbot.lookup".to_string(),
+        output: serde_json::json!({"ok": true}),
+        success: true,
+        simulated_latency_ms: None,
+    };
+
+    let call_a = ToolCall {
+        step: 0,
+        tool_call_idx: 1,
+        request: ToolRequest {
+            tool_name: "clawdbot.lookup".to_string(),
+            arguments: serde_json::json!({"order": "second"}),
+        },
+        response: response.clone(),
+        fault: None,
+    };
+
+    let call_b = ToolCall {
+        step: 0,
+        tool_call_idx: 0,
+        request: ToolRequest {
+            tool_name: "clawdbot.lookup".to_string(),
+            arguments: serde_json::json!({"order": "first"}),
+        },
+        response,
+        fault: None,
+    };
+
+    let root_unsorted =
+        witness_root_for_agent(&metadata, &agent_trace, &[call_a.clone(), call_b.clone()]);
+    let root_sorted = witness_root_for_agent(&metadata, &agent_trace, &[call_b, call_a]);
+
+    assert_eq!(root_unsorted, root_sorted);
+}
+
+#[test]
+fn stub_hash_is_canonical_for_request_arguments() {
+    let mut map_a = serde_json::Map::new();
+    map_a.insert("a".to_string(), serde_json::json!(1));
+    map_a.insert("b".to_string(), serde_json::json!(2));
+    let mut map_b = serde_json::Map::new();
+    map_b.insert("b".to_string(), serde_json::json!(2));
+    map_b.insert("a".to_string(), serde_json::json!(1));
+
+    let request_a = ToolRequest {
+        tool_name: "clawdbot.lookup".to_string(),
+        arguments: serde_json::Value::Object(map_a),
+    };
+    let request_b = ToolRequest {
+        tool_name: "clawdbot.lookup".to_string(),
+        arguments: serde_json::Value::Object(map_b),
+    };
+
+    let mut transcript = ToolTranscript::new_live(None);
+    let response_a = transcript.execute(0, request_a);
+    let response_b = transcript.execute(0, request_b);
+
+    let hash_a = response_a
+        .output
+        .get("hash")
+        .and_then(|value| value.as_str())
+        .expect("hash a");
+    let hash_b = response_b
+        .output
+        .get("hash")
+        .and_then(|value| value.as_str())
+        .expect("hash b");
+
+    assert_eq!(hash_a, hash_b);
+}
+
+#[test]
+fn agent_witness_root_invariant_across_thread_counts() {
+    let roots: Vec<String> = [1usize, 2, 4]
+        .iter()
+        .map(|threads| {
+            ThreadPoolBuilder::new()
+                .num_threads(*threads)
+                .build()
+                .unwrap()
+                .install(|| {
+                    let metadata = WitnessedMetadata {
+                        schema_version: TRACE_SCHEMA_VERSION,
+                        seed: 13,
+                        requested_runs: 1,
+                        executed_runs: 1,
+                        parallel: false,
+                        parallel_strategy: "sequential".to_string(),
+                        case_filter: None,
+                        entropy_sources: vec![
+                            "rng:StdRng(seed)".to_string(),
+                            "tooling:stubbed-or-replay".to_string(),
+                            "chaos:fault-schedule".to_string(),
+                        ],
+                        total_rng_calls: 0,
+                        chaos_profile: None,
+                    };
+
+                    let mut agent = cogitator::agent::ClawdbotAgent::new(13);
+                    let mut agent_trace = Vec::new();
+                    let mut transcript = ToolTranscript::new_live(None);
+                    let mut prior_outputs = Vec::new();
+
+                    for step in 0..2u32 {
+                        let input = cogitator::agent::AgentInput {
+                            run_id: 0,
+                            case_id: "case".to_string(),
+                            step,
+                            seed: 13,
+                            prior_tool_outputs: prior_outputs.clone(),
+                        };
+                        let output = agent.step(input);
+                        agent_trace.push(cogitator::agent::trace_entry_from_output(step, &output));
+                        for request in output.tool_requests {
+                            let response = transcript.execute(step, request);
+                            prior_outputs.push(response);
+                        }
+                        if output.is_final {
+                            break;
+                        }
+                    }
+
+                    let record = transcript.into_record();
+                    trace::compute_agent_witness_root(&metadata, &agent_trace, &record.entries)
+                        .expect("root")
+                })
+        })
+        .collect();
+
+    assert!(roots.iter().all(|root| root == &roots[0]));
 }

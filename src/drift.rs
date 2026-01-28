@@ -7,17 +7,18 @@ use std::path::Path;
 use crate::agent::AgentTraceEntry;
 use crate::canonical_json;
 use crate::model::WitnessManifest;
+use crate::report::DriftIssue;
 use crate::tooling::{ToolCall, ToolTranscriptRecord};
-use crate::{model::RunMetadata, trace, witness};
+use crate::{model::RunMetadata, trace};
 
-pub const DRIFT_SCHEMA_VERSION: u32 = 1;
+pub const DRIFT_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DriftReport {
     pub schema_version: u32,
     pub drifted: bool,
-    pub issues: Vec<String>,
+    pub issues: Vec<DriftIssue>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,11 +52,10 @@ pub fn detect_transcript_drift(
     let mut issues = Vec::new();
 
     if expected.entries.len() != actual.entries.len() {
-        issues.push(format!(
-            "tool call count mismatch: expected {}, got {}",
-            expected.entries.len(),
-            actual.entries.len()
-        ));
+        issues.push(DriftIssue::ToolCallCountMismatch {
+            expected: expected.entries.len() as u32,
+            actual: actual.entries.len() as u32,
+        });
     }
 
     for (index, (exp, act)) in expected
@@ -65,27 +65,35 @@ pub fn detect_transcript_drift(
         .enumerate()
     {
         if exp.step != act.step {
-            issues.push(format!(
-                "tool call step mismatch at {}: expected {}, got {}",
-                index, exp.step, act.step
-            ));
+            issues.push(DriftIssue::ToolStepMismatch {
+                index: index as u32,
+                expected: exp.step,
+                actual: act.step,
+            });
         }
         if exp.request != act.request {
-            issues.push(format!("tool request mismatch at {}", index));
+            issues.push(DriftIssue::ToolRequestMismatch {
+                index: index as u32,
+            });
         }
         if exp.tool_call_idx != act.tool_call_idx {
-            issues.push(format!(
-                "tool call index mismatch at {}: expected {}, got {}",
-                index, exp.tool_call_idx, act.tool_call_idx
-            ));
+            issues.push(DriftIssue::ToolCallIndexMismatch {
+                index: index as u32,
+                expected: exp.tool_call_idx,
+                actual: act.tool_call_idx,
+            });
         }
         if exp.fault != act.fault {
-            issues.push(format!("tool fault mismatch at {}", index));
+            issues.push(DriftIssue::ToolFaultMismatch {
+                index: index as u32,
+            });
         }
         let exp_hash = response_hash(&exp.response);
         let act_hash = response_hash(&act.response);
         if exp_hash != act_hash {
-            issues.push(format!("tool response hash mismatch at {}", index));
+            issues.push(DriftIssue::ToolResponseHashMismatch {
+                index: index as u32,
+            });
         }
     }
 
@@ -102,6 +110,10 @@ pub fn build_hash_chain(
 ) -> Result<Vec<String>> {
     let mut chain = Vec::new();
     let mut current = initial_hash();
+    let mut calls_by_step = trace::index_tool_calls_by_step(tool_calls);
+    for calls in calls_by_step.values_mut() {
+        calls.sort_by_key(|call| call.tool_call_idx);
+    }
 
     for entry in agent_trace {
         let payload = serde_json::json!({
@@ -111,13 +123,15 @@ pub fn build_hash_chain(
         current = chained_hash(&current, &payload)?;
         chain.push(hex_string(&current));
 
-        for call in tool_calls.iter().filter(|call| call.step == entry.step) {
-            let payload = serde_json::json!({
-                "kind": "tool_call",
-                "payload": trace::tool_call_witness_value(call)?,
-            });
-            current = chained_hash(&current, &payload)?;
-            chain.push(hex_string(&current));
+        if let Some(calls) = calls_by_step.get_mut(&entry.step) {
+            for call in calls.iter() {
+                let payload = serde_json::json!({
+                    "kind": "tool_call",
+                    "payload": trace::tool_call_witness_value_canonical(call)?,
+                });
+                current = chained_hash(&current, &payload)?;
+                chain.push(hex_string(&current));
+            }
         }
     }
 
@@ -200,8 +214,8 @@ pub fn verify_witness_bundle(dir: &Path) -> Result<VerifyReport> {
         .and_then(|path| std::fs::read_to_string(path).ok())
         .map(|value| value.trim().to_string());
 
-    let witness_root_actual = compute_agent_witness_root(&manifest, &agent_trace, &tool_transcript)
-        .ok();
+    let witness_root_actual =
+        compute_agent_witness_root(&manifest, &agent_trace, &tool_transcript).ok();
 
     if let (Some(expected), Some(actual)) =
         (witness_root_expected.as_ref(), witness_root_actual.as_ref())
@@ -298,26 +312,10 @@ fn compute_agent_witness_root(
     agent_trace: &[AgentTraceEntry],
     tool_transcript: &ToolTranscriptRecord,
 ) -> Result<String> {
-    let meta_file = std::fs::File::open(&manifest.meta_json)
-        .with_context(|| "failed to open meta.json")?;
+    let meta_file =
+        std::fs::File::open(&manifest.meta_json).with_context(|| "failed to open meta.json")?;
     let metadata: RunMetadata =
         serde_json::from_reader(meta_file).with_context(|| "failed to parse meta.json")?;
 
-    let metadata_bytes = trace::encode_witnessed_metadata(&metadata.witnessed)?;
-    let mut witness = witness::Witness::new(&metadata_bytes)?;
-
-    for entry in agent_trace {
-        let entry_bytes = trace::encode_agent_trace_entry(entry)?;
-        witness.update(&entry_bytes)?;
-        for call in tool_transcript
-            .entries
-            .iter()
-            .filter(|call| call.step == entry.step)
-        {
-            let call_bytes = trace::encode_tool_call(call)?;
-            witness.update(&call_bytes)?;
-        }
-    }
-
-    Ok(witness.finalize_hex())
+    trace::compute_agent_witness_root(&metadata.witnessed, agent_trace, &tool_transcript.entries)
 }

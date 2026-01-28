@@ -28,6 +28,7 @@
     "hash_chain_txt": { "type": "string" },
     "chaos_profile_json": { "type": ["string", "null"] },
     "witness_root_txt": { "type": ["string", "null"] },
+    "nix_provenance_json": { "type": ["string", "null"] },
     "artifact_hashes": {
       "type": "object",
       "additionalProperties": { "type": "string" }

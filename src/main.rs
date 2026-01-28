@@ -8,12 +8,14 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod agent;
 mod canonical_json;
 mod chaos;
-mod agent;
 mod drift;
 mod eval;
 mod model;
+mod nix_provenance;
+mod report;
 mod tooling;
 mod trace;
 mod verify;
@@ -116,23 +118,38 @@ pub struct RunArgs {
     #[arg(long)]
     pub replay: Option<PathBuf>,
 
-    #[arg(long, default_value = "off", value_enum)]
+    #[arg(
+        long,
+        default_value_t = 1,
+        help = "Agent/replay only; stored in provenance only"
+    )]
+    pub threads: usize,
+
+    #[arg(long, default_value = "off", value_enum, help = "Agent/replay only")]
     pub faults: FaultToggle,
 
-    #[arg(long, default_value = "none", value_enum)]
+    #[arg(long, default_value = "none", value_enum, help = "Agent/replay only")]
     pub fault_profile: FaultProfile,
 
-    #[arg(long)]
+    #[arg(long, help = "Agent/replay only")]
     pub fault_timeout_rate: Option<f64>,
 
-    #[arg(long)]
+    #[arg(long, help = "Agent/replay only")]
     pub fault_corrupt_rate: Option<f64>,
 
-    #[arg(long)]
+    #[arg(long, help = "Agent/replay only")]
     pub fault_drop_rate: Option<f64>,
 
-    #[arg(long)]
+    #[arg(long, help = "Agent/replay only")]
     pub fault_latency_rate: Option<f64>,
+
+    #[arg(
+        long,
+        default_value = "auto",
+        value_enum,
+        help = "Capture Nix provenance (auto|on|off)"
+    )]
+    pub nix_provenance: nix_provenance::NixProvenanceMode,
 }
 
 /// Verify a trace against an expected witness root.
@@ -166,6 +183,21 @@ fn run(args: RunArgs) -> Result<()> {
         return run_agent(args);
     }
 
+    if args.threads != 1 {
+        anyhow::bail!("--threads is only supported in agent mode (--agent or --replay)");
+    }
+    if args.faults != FaultToggle::Off
+        || args.fault_profile != FaultProfile::None
+        || args.fault_timeout_rate.is_some()
+        || args.fault_corrupt_rate.is_some()
+        || args.fault_drop_rate.is_some()
+        || args.fault_latency_rate.is_some()
+    {
+        anyhow::bail!(
+            "fault injection flags are only supported in agent mode (--agent or --replay)"
+        );
+    }
+
     let run_ids: Vec<u32> = match args.case {
         Some(case_id) => vec![case_id],
         None => (0..args.runs).collect(),
@@ -180,9 +212,24 @@ fn run(args: RunArgs) -> Result<()> {
 
     fs::create_dir_all(&args.out_dir).with_context(|| "failed to create output dir")?;
 
-    let metadata = build_metadata(&args, output.total_rng_calls, run_ids.len() as u32);
+    let nix_provenance =
+        nix_provenance::collect_nix_provenance(args.nix_provenance.clone(), Path::new("."))?;
+    let metadata = build_metadata(
+        &args,
+        output.total_rng_calls,
+        run_ids.len() as u32,
+        nix_provenance.clone(),
+    );
     let meta_path = args.out_dir.join("meta.json");
     canonical_json::write_json(&meta_path, &metadata, "meta.json")?;
+
+    let nix_provenance_path = if let Some(ref provenance) = nix_provenance {
+        let path = args.out_dir.join("nix_provenance.json");
+        nix_provenance::write_nix_provenance(&path, provenance)?;
+        Some(path)
+    } else {
+        None
+    };
 
     let trace_path = args.out_dir.join("trace.jsonl");
     write_trace(&trace_path, &output.trace)?;
@@ -209,6 +256,9 @@ fn run(args: RunArgs) -> Result<()> {
         summary_json: summary_json_path.display().to_string(),
         witness_root_txt: witness_path.display().to_string(),
         analysis_json: args.out_dir.join("analysis.json").display().to_string(),
+        nix_provenance_json: nix_provenance_path
+            .as_ref()
+            .map(|path| path.display().to_string()),
         agent_trace_json: None,
         tool_transcript_json: None,
         witness_manifest_json: None,
@@ -251,6 +301,9 @@ fn run(args: RunArgs) -> Result<()> {
         println!("  summary.json: {}", summary_json_path.display());
         println!("  analysis.json: {}", analysis_path.display());
         println!("  witness_root.txt: {}", witness_path.display());
+        if let Some(path) = nix_provenance_path.as_ref() {
+            println!("  nix_provenance.json: {}", path.display());
+        }
     }
 
     println!(
@@ -305,8 +358,7 @@ fn demo_drift(args: DemoDriftArgs) -> Result<()> {
 
             let chaos_profile =
                 demo_chaos_profile(args.seed, args.fault_profile.clone(), faults_enabled);
-            let demo_run =
-                run_demo_agent(args.seed, 0, chaos_profile.clone(), regress)?;
+            let demo_run = run_demo_agent(args.seed, 0, chaos_profile.clone(), regress)?;
 
             let expected = match (faults_enabled, regress) {
                 (false, true) => baseline_no_faults.as_ref(),
@@ -335,12 +387,17 @@ fn demo_drift(args: DemoDriftArgs) -> Result<()> {
             )?;
 
             let agent_trace_path = scenario_dir.join("agent_trace.json");
-            canonical_json::write_json(&agent_trace_path, &demo_run.agent_trace, "agent_trace.json")?;
+            canonical_json::write_json(
+                &agent_trace_path,
+                &demo_run.agent_trace,
+                "agent_trace.json",
+            )?;
 
             let tool_transcript_path = scenario_dir.join("tool_transcript.json");
             tooling::write_transcript(&tool_transcript_path, &demo_run.transcript)?;
 
-            let hash_chain = drift::build_hash_chain(&demo_run.agent_trace, &demo_run.transcript.entries)?;
+            let hash_chain =
+                drift::build_hash_chain(&demo_run.agent_trace, &demo_run.transcript.entries)?;
             let hash_chain_path = scenario_dir.join("hash_chain.txt");
             fs::write(&hash_chain_path, hash_chain.join("\n") + "\n")
                 .with_context(|| "failed to write hash_chain.txt")?;
@@ -372,7 +429,11 @@ fn demo_drift(args: DemoDriftArgs) -> Result<()> {
                 schema_version: model::WITNESS_MANIFEST_SCHEMA_VERSION,
                 run_id: 0,
                 agent: "clawdbot".to_string(),
-                mode: if regress { "replay".to_string() } else { "live".to_string() },
+                mode: if regress {
+                    "replay".to_string()
+                } else {
+                    "live".to_string()
+                },
                 meta_json: meta_path.display().to_string(),
                 agent_trace_json: agent_trace_path.display().to_string(),
                 tool_transcript_json: tool_transcript_path.display().to_string(),
@@ -380,9 +441,19 @@ fn demo_drift(args: DemoDriftArgs) -> Result<()> {
                 hash_chain_txt: hash_chain_path.display().to_string(),
                 chaos_profile_json: Some(chaos_profile_path.display().to_string()),
                 witness_root_txt: Some(witness_root_path.display().to_string()),
+                nix_provenance_json: None,
                 artifact_hashes,
                 bundle_hash,
-                replay_source: expected.map(|_| base_dir.join(if faults_enabled { "baseline_faults" } else { "baseline" }).display().to_string()),
+                replay_source: expected.map(|_| {
+                    base_dir
+                        .join(if faults_enabled {
+                            "baseline_faults"
+                        } else {
+                            "baseline"
+                        })
+                        .display()
+                        .to_string()
+                }),
             };
 
             let witness_manifest_path = scenario_dir.join("witness_manifest.json");
@@ -409,15 +480,16 @@ fn demo_drift(args: DemoDriftArgs) -> Result<()> {
         Ok::<(), anyhow::Error>(())
     })?;
 
-    println!(
-        "Drift demo complete. Outputs at {}",
-        base_dir.display()
-    );
+    println!("Drift demo complete. Outputs at {}", base_dir.display());
 
     Ok(())
 }
 
 fn run_agent(args: RunArgs) -> Result<()> {
+    if args.threads == 0 {
+        anyhow::bail!("--threads must be at least 1");
+    }
+
     let run_ids: Vec<u32> = match args.case {
         Some(case_id) => vec![case_id],
         None => (0..args.runs).collect(),
@@ -427,234 +499,265 @@ fn run_agent(args: RunArgs) -> Result<()> {
         anyhow::bail!("--replay requires a single --case or --runs 1");
     }
 
-    if args.clean && args.out_dir.exists() {
-        fs::remove_dir_all(&args.out_dir).with_context(|| "failed to clean output dir")?;
-    }
-    fs::create_dir_all(&args.out_dir).with_context(|| "failed to create output dir")?;
+    let nix_provenance =
+        nix_provenance::collect_nix_provenance(args.nix_provenance.clone(), Path::new("."))?;
 
-    let replay_bundle = if let Some(replay_dir) = args.replay.as_ref() {
-        let manifest_path = replay_dir.join("witness_manifest.json");
-        let manifest_file =
-            File::open(&manifest_path).with_context(|| "failed to open witness_manifest.json")?;
-        let manifest: model::WitnessManifest = serde_json::from_reader(manifest_file)
-            .with_context(|| "failed to parse witness_manifest.json")?;
-        let transcript = tooling::read_transcript(Path::new(&manifest.tool_transcript_json))?;
-        let agent_trace_file = File::open(&manifest.agent_trace_json)
-            .with_context(|| "failed to open agent_trace.json")?;
-        let agent_trace: Vec<agent::AgentTraceEntry> = serde_json::from_reader(agent_trace_file)
-            .with_context(|| "failed to parse agent_trace.json")?;
-        Some((manifest, transcript, agent_trace))
-    } else {
-        None
-    };
+    let thread_pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(args.threads)
+        .build()?;
 
-    let replay_chaos_profile = replay_bundle
-        .as_ref()
-        .and_then(|(manifest, _, _)| manifest.chaos_profile_json.as_ref())
-        .and_then(|path| File::open(path).ok())
-        .and_then(|file| serde_json::from_reader(file).ok());
+    thread_pool.install(|| -> Result<()> {
+        if args.clean && args.out_dir.exists() {
+            fs::remove_dir_all(&args.out_dir).with_context(|| "failed to clean output dir")?;
+        }
+        fs::create_dir_all(&args.out_dir).with_context(|| "failed to create output dir")?;
 
-    let agent_name = args.agent.clone().or_else(|| {
-        replay_bundle
+        let replay_bundle = if let Some(replay_dir) = args.replay.as_ref() {
+            let manifest_path = replay_dir.join("witness_manifest.json");
+            let manifest_file = File::open(&manifest_path)
+                .with_context(|| "failed to open witness_manifest.json")?;
+            let manifest: model::WitnessManifest = serde_json::from_reader(manifest_file)
+                .with_context(|| "failed to parse witness_manifest.json")?;
+            let transcript = tooling::read_transcript(Path::new(&manifest.tool_transcript_json))?;
+            let agent_trace_file = File::open(&manifest.agent_trace_json)
+                .with_context(|| "failed to open agent_trace.json")?;
+            let agent_trace: Vec<agent::AgentTraceEntry> =
+                serde_json::from_reader(agent_trace_file)
+                    .with_context(|| "failed to parse agent_trace.json")?;
+            Some((manifest, transcript, agent_trace))
+        } else {
+            None
+        };
+
+        let replay_chaos_profile = replay_bundle
             .as_ref()
-            .map(|(manifest, _, _)| manifest.agent.clone())
-    });
-    let agent_name = agent_name.unwrap_or_else(|| "clawdbot".to_string());
+            .and_then(|(manifest, _, _)| manifest.chaos_profile_json.as_ref())
+            .and_then(|path| File::open(path).ok())
+            .and_then(|file| serde_json::from_reader(file).ok());
 
-    if agent_name != "clawdbot" {
-        anyhow::bail!("unsupported agent: {}", agent_name);
-    }
+        let agent_name = args.agent.clone().or_else(|| {
+            replay_bundle
+                .as_ref()
+                .map(|(manifest, _, _)| manifest.agent.clone())
+        });
+        let agent_name = agent_name.unwrap_or_else(|| "clawdbot".to_string());
 
-    let tui_enabled = !args.no_tui && cfg!(feature = "tui");
+        if agent_name != "clawdbot" {
+            anyhow::bail!("unsupported agent: {}", agent_name);
+        }
 
-    let single_run = run_ids.len() == 1;
+        let tui_enabled = !args.no_tui && cfg!(feature = "tui");
 
-    for &run_id in run_ids.iter() {
-        let case_id = derive_case_id(args.seed, run_id);
-        let run_dir = args.out_dir.join(format!("run_{:04}", run_id));
-        fs::create_dir_all(&run_dir).with_context(|| "failed to create run dir")?;
+        let single_run = run_ids.len() == 1;
 
-        let chaos_profile =
-            replay_chaos_profile.clone().unwrap_or_else(|| resolve_chaos_profile(&args, args.seed));
-        let metadata = build_agent_metadata(&args, 0, chaos_profile.clone());
-        let meta_path = run_dir.join("meta.json");
-        canonical_json::write_json(&meta_path, &metadata, "meta.json")?;
+        for &run_id in run_ids.iter() {
+            let case_id = derive_case_id(args.seed, run_id);
+            let run_dir = args.out_dir.join(format!("run_{:04}", run_id));
+            fs::create_dir_all(&run_dir).with_context(|| "failed to create run dir")?;
 
-        let chaos_profile_path = run_dir.join("chaos_profile.json");
-        canonical_json::write_json(&chaos_profile_path, &chaos_profile, "chaos_profile.json")?;
+            let chaos_profile = replay_chaos_profile
+                .clone()
+                .unwrap_or_else(|| resolve_chaos_profile(&args, args.seed));
+            let metadata =
+                build_agent_metadata(&args, 0, chaos_profile.clone(), nix_provenance.clone());
+            let meta_path = run_dir.join("meta.json");
+            canonical_json::write_json(&meta_path, &metadata, "meta.json")?;
 
-        let chaos_engine = if replay_bundle.is_some() {
-            None
-        } else if chaos_profile.enabled {
-            Some(chaos::ChaosEngine::new(chaos_profile.clone(), run_id))
-        } else {
-            None
-        };
-
-        let mut tool_transcript = if let Some((_, transcript, _)) = replay_bundle.as_ref() {
-            tooling::ToolTranscript::new_replay(transcript.clone())
-        } else {
-            tooling::ToolTranscript::new_live(chaos_engine)
-        };
-
-        let mut agent = agent::ClawdbotAgent::new(args.seed);
-        let mut agent_trace = Vec::new();
-        let mut prior_outputs = Vec::new();
-
-        const MAX_STEPS: u32 = 8;
-        for step in 0..MAX_STEPS {
-            let input = agent::AgentInput {
-                run_id,
-                case_id: case_id.clone(),
-                step,
-                seed: args.seed,
-                prior_tool_outputs: prior_outputs.clone(),
+            let nix_provenance_path = if let Some(ref provenance) = nix_provenance {
+                let path = run_dir.join("nix_provenance.json");
+                nix_provenance::write_nix_provenance(&path, provenance)?;
+                Some(path)
+            } else {
+                None
             };
-            let output = agent.step(input);
-            agent_trace.push(agent::trace_entry_from_output(step, &output));
 
-            for request in output.tool_requests {
-                let response = tool_transcript.execute(step, request);
-                prior_outputs.push(response);
+            let chaos_profile_path = run_dir.join("chaos_profile.json");
+            canonical_json::write_json(&chaos_profile_path, &chaos_profile, "chaos_profile.json")?;
+
+            let chaos_engine = if replay_bundle.is_some() {
+                None
+            } else if chaos_profile.enabled {
+                Some(chaos::ChaosEngine::new(chaos_profile.clone(), run_id))
+            } else {
+                None
+            };
+
+            let mut tool_transcript = if let Some((_, transcript, _)) = replay_bundle.as_ref() {
+                tooling::ToolTranscript::new_replay(transcript.clone())
+            } else {
+                tooling::ToolTranscript::new_live(chaos_engine)
+            };
+
+            let mut agent = agent::ClawdbotAgent::new(args.seed);
+            let mut agent_trace = Vec::new();
+            let mut prior_outputs = Vec::new();
+
+            const MAX_STEPS: u32 = 8;
+            for step in 0..MAX_STEPS {
+                let input = agent::AgentInput {
+                    run_id,
+                    case_id: case_id.clone(),
+                    step,
+                    seed: args.seed,
+                    prior_tool_outputs: prior_outputs.clone(),
+                };
+                let output = agent.step(input);
+                agent_trace.push(agent::trace_entry_from_output(step, &output));
+
+                for request in output.tool_requests {
+                    let response = tool_transcript.execute(step, request);
+                    prior_outputs.push(response);
+                }
+
+                if output.is_final {
+                    break;
+                }
             }
 
-            if output.is_final {
-                break;
-            }
-        }
+            let mismatches = tool_transcript.mismatches().to_vec();
+            let transcript_record = tool_transcript.into_record();
+            let agent_trace_path = run_dir.join("agent_trace.json");
+            canonical_json::write_json(&agent_trace_path, &agent_trace, "agent_trace.json")?;
 
-        let mismatches = tool_transcript.mismatches().to_vec();
-        let transcript_record = tool_transcript.into_record();
-        let agent_trace_path = run_dir.join("agent_trace.json");
-        canonical_json::write_json(&agent_trace_path, &agent_trace, "agent_trace.json")?;
+            let tool_transcript_path = run_dir.join("tool_transcript.json");
+            tooling::write_transcript(&tool_transcript_path, &transcript_record)?;
 
-        let tool_transcript_path = run_dir.join("tool_transcript.json");
-        tooling::write_transcript(&tool_transcript_path, &transcript_record)?;
+            let hash_chain = drift::build_hash_chain(&agent_trace, &transcript_record.entries)?;
+            let hash_chain_path = run_dir.join("hash_chain.txt");
+            fs::write(&hash_chain_path, hash_chain.join("\n") + "\n")
+                .with_context(|| "failed to write hash_chain.txt")?;
 
-        let hash_chain = drift::build_hash_chain(&agent_trace, &transcript_record.entries)?;
-        let hash_chain_path = run_dir.join("hash_chain.txt");
-        fs::write(&hash_chain_path, hash_chain.join("\n") + "\n")
-            .with_context(|| "failed to write hash_chain.txt")?;
-
-        let agent_witness_root = compute_agent_witness_root(
-            &metadata.witnessed,
-            &agent_trace,
-            &transcript_record.entries,
-        )?;
-        let agent_witness_path = run_dir.join("witness_root.txt");
-        fs::write(&agent_witness_path, format!("{}\n", agent_witness_root))
-            .with_context(|| "failed to write witness_root.txt")?;
-
-        let drift_report = if let Some((_, expected_transcript, _)) = replay_bundle.as_ref() {
-            let mut report =
-                drift::detect_transcript_drift(expected_transcript, &transcript_record);
-            for issue in mismatches {
-                report.issues.push(issue);
-            }
-            report.drifted = report.drifted || !report.issues.is_empty();
-            report
-        } else {
-            drift::DriftReport {
-                schema_version: drift::DRIFT_SCHEMA_VERSION,
-                drifted: !mismatches.is_empty(),
-                issues: mismatches,
-            }
-        };
-
-        let drift_report_path = run_dir.join("drift_report.json");
-        canonical_json::write_json(&drift_report_path, &drift_report, "drift_report.json")?;
-
-        let artifact_hashes = drift::artifact_hashes(&[
-            &meta_path,
-            &agent_trace_path,
-            &tool_transcript_path,
-            &drift_report_path,
-            &hash_chain_path,
-            &chaos_profile_path,
-            &agent_witness_path,
-        ])?;
-        let bundle_hash = drift::bundle_hash(&artifact_hashes)?;
-
-        let witness_manifest = model::WitnessManifest {
-            schema_version: model::WITNESS_MANIFEST_SCHEMA_VERSION,
-            run_id,
-            agent: agent_name.clone(),
-            mode: match transcript_record.mode {
-                tooling::ToolMode::Live => "live".to_string(),
-                tooling::ToolMode::Replay => "replay".to_string(),
-            },
-            meta_json: meta_path.display().to_string(),
-            agent_trace_json: agent_trace_path.display().to_string(),
-            tool_transcript_json: tool_transcript_path.display().to_string(),
-            drift_report_json: drift_report_path.display().to_string(),
-            hash_chain_txt: hash_chain_path.display().to_string(),
-            chaos_profile_json: Some(chaos_profile_path.display().to_string()),
-            witness_root_txt: Some(agent_witness_path.display().to_string()),
-            artifact_hashes,
-            bundle_hash,
-            replay_source: args.replay.as_ref().map(|path| path.display().to_string()),
-        };
-
-        let witness_manifest_path = run_dir.join("witness_manifest.json");
-        canonical_json::write_json(
-            &witness_manifest_path,
-            &witness_manifest,
-            "witness_manifest.json",
-        )?;
-
-        let _manifest = model::ArtifactManifest {
-            meta_json: meta_path.display().to_string(),
-            trace_jsonl: String::new(),
-            results_csv: String::new(),
-            results_json: String::new(),
-            summary_json: String::new(),
-            witness_root_txt: String::new(),
-            analysis_json: String::new(),
-            agent_trace_json: Some(agent_trace_path.display().to_string()),
-            tool_transcript_json: Some(tool_transcript_path.display().to_string()),
-            witness_manifest_json: Some(witness_manifest_path.display().to_string()),
-            hash_chain_txt: Some(hash_chain_path.display().to_string()),
-            drift_report_json: Some(drift_report_path.display().to_string()),
-            chaos_profile_json: Some(chaos_profile_path.display().to_string()),
-        };
-
-        if tui_enabled && single_run {
-            #[cfg(feature = "tui")]
-            tui::launch_agent(
-                &agent_name,
-                run_id,
-                args.seed,
+            let agent_witness_root = compute_agent_witness_root(
+                &metadata.witnessed,
                 &agent_trace,
-                &transcript_record,
-                &drift_report,
-                args.replay.is_some(),
-                &_manifest,
+                &transcript_record.entries,
             )?;
-        } else if !tui_enabled && single_run && !args.no_tui {
-            println!("TUI disabled (missing feature).");
+            let agent_witness_path = run_dir.join("witness_root.txt");
+            fs::write(&agent_witness_path, format!("{}\n", agent_witness_root))
+                .with_context(|| "failed to write witness_root.txt")?;
+
+            let drift_report = if let Some((_, expected_transcript, _)) = replay_bundle.as_ref() {
+                let mut report =
+                    drift::detect_transcript_drift(expected_transcript, &transcript_record);
+                report.issues.extend(mismatches);
+                report.drifted = report.drifted || !report.issues.is_empty();
+                report
+            } else {
+                drift::DriftReport {
+                    schema_version: drift::DRIFT_SCHEMA_VERSION,
+                    drifted: !mismatches.is_empty(),
+                    issues: mismatches,
+                }
+            };
+
+            let drift_report_path = run_dir.join("drift_report.json");
+            canonical_json::write_json(&drift_report_path, &drift_report, "drift_report.json")?;
+
+            let mut artifact_paths: Vec<&Path> = vec![
+                &meta_path,
+                &agent_trace_path,
+                &tool_transcript_path,
+                &drift_report_path,
+                &hash_chain_path,
+                &chaos_profile_path,
+                &agent_witness_path,
+            ];
+            if let Some(ref path) = nix_provenance_path {
+                artifact_paths.push(path.as_path());
+            }
+            let artifact_hashes = drift::artifact_hashes(&artifact_paths)?;
+            let bundle_hash = drift::bundle_hash(&artifact_hashes)?;
+
+            let witness_manifest = model::WitnessManifest {
+                schema_version: model::WITNESS_MANIFEST_SCHEMA_VERSION,
+                run_id,
+                agent: agent_name.clone(),
+                mode: match transcript_record.mode {
+                    tooling::ToolMode::Live => "live".to_string(),
+                    tooling::ToolMode::Replay => "replay".to_string(),
+                },
+                meta_json: meta_path.display().to_string(),
+                agent_trace_json: agent_trace_path.display().to_string(),
+                tool_transcript_json: tool_transcript_path.display().to_string(),
+                drift_report_json: drift_report_path.display().to_string(),
+                hash_chain_txt: hash_chain_path.display().to_string(),
+                chaos_profile_json: Some(chaos_profile_path.display().to_string()),
+                witness_root_txt: Some(agent_witness_path.display().to_string()),
+                nix_provenance_json: nix_provenance_path
+                    .as_ref()
+                    .map(|path| path.display().to_string()),
+                artifact_hashes,
+                bundle_hash,
+                replay_source: args.replay.as_ref().map(|path| path.display().to_string()),
+            };
+
+            let witness_manifest_path = run_dir.join("witness_manifest.json");
+            canonical_json::write_json(
+                &witness_manifest_path,
+                &witness_manifest,
+                "witness_manifest.json",
+            )?;
+
+            let _manifest = model::ArtifactManifest {
+                meta_json: meta_path.display().to_string(),
+                trace_jsonl: String::new(),
+                results_csv: String::new(),
+                results_json: String::new(),
+                summary_json: String::new(),
+                witness_root_txt: String::new(),
+                analysis_json: String::new(),
+                nix_provenance_json: nix_provenance_path
+                    .as_ref()
+                    .map(|path| path.display().to_string()),
+                agent_trace_json: Some(agent_trace_path.display().to_string()),
+                tool_transcript_json: Some(tool_transcript_path.display().to_string()),
+                witness_manifest_json: Some(witness_manifest_path.display().to_string()),
+                hash_chain_txt: Some(hash_chain_path.display().to_string()),
+                drift_report_json: Some(drift_report_path.display().to_string()),
+                chaos_profile_json: Some(chaos_profile_path.display().to_string()),
+            };
+
+            if tui_enabled && single_run {
+                #[cfg(feature = "tui")]
+                tui::launch_agent(
+                    &agent_name,
+                    run_id,
+                    args.seed,
+                    &agent_trace,
+                    &transcript_record,
+                    &drift_report,
+                    args.replay.is_some(),
+                    &_manifest,
+                )?;
+            } else if !tui_enabled && single_run && !args.no_tui {
+                println!("TUI disabled (missing feature).");
+            }
+
+            println!(
+                "Agent={} Run={} OutputDir={} Drifted={}",
+                agent_name,
+                run_id,
+                run_dir.display(),
+                drift_report.drifted
+            );
+            println!("Artifacts:");
+            println!("  agent_trace.json: {}", agent_trace_path.display());
+            println!("  tool_transcript.json: {}", tool_transcript_path.display());
+            println!("  chaos_profile.json: {}", chaos_profile_path.display());
+            println!(
+                "  witness_manifest.json: {}",
+                witness_manifest_path.display()
+            );
+            println!("  hash_chain.txt: {}", hash_chain_path.display());
+            println!("  drift_report.json: {}", drift_report_path.display());
+            println!("  witness_root.txt: {}", agent_witness_path.display());
+            if let Some(path) = nix_provenance_path.as_ref() {
+                println!("  nix_provenance.json: {}", path.display());
+            }
         }
 
-        println!(
-            "Agent={} Run={} OutputDir={} Drifted={}",
-            agent_name,
-            run_id,
-            run_dir.display(),
-            drift_report.drifted
-        );
-        println!("Artifacts:");
-        println!("  agent_trace.json: {}", agent_trace_path.display());
-        println!("  tool_transcript.json: {}", tool_transcript_path.display());
-        println!("  chaos_profile.json: {}", chaos_profile_path.display());
-        println!(
-            "  witness_manifest.json: {}",
-            witness_manifest_path.display()
-        );
-        println!("  hash_chain.txt: {}", hash_chain_path.display());
-        println!("  drift_report.json: {}", drift_report_path.display());
-        println!("  witness_root.txt: {}", agent_witness_path.display());
-    }
-
-    Ok(())
+        Ok(())
+    })
 }
 
 fn verify_cmd(args: VerifyArgs) -> Result<()> {
@@ -668,7 +771,10 @@ fn verify_cmd(args: VerifyArgs) -> Result<()> {
                 report.bundle_hash_expected,
                 report.bundle_hash_actual
             );
-            println!("verify_report.json: {}", witness.join("verify_report.json").display());
+            println!(
+                "verify_report.json: {}",
+                witness.join("verify_report.json").display()
+            );
             if !report.verified {
                 anyhow::bail!("witness bundle verification failed");
             }
@@ -721,22 +827,15 @@ fn compute_agent_witness_root(
     agent_trace: &[agent::AgentTraceEntry],
     tool_calls: &[tooling::ToolCall],
 ) -> Result<String> {
-    let metadata_bytes = trace::encode_witnessed_metadata(metadata)?;
-    let mut witness = witness::Witness::new(&metadata_bytes)?;
-
-    for entry in agent_trace {
-        let entry_bytes = trace::encode_agent_trace_entry(entry)?;
-        witness.update(&entry_bytes)?;
-        for call in tool_calls.iter().filter(|call| call.step == entry.step) {
-            let call_bytes = trace::encode_tool_call(call)?;
-            witness.update(&call_bytes)?;
-        }
-    }
-
-    Ok(witness.finalize_hex())
+    trace::compute_agent_witness_root(metadata, agent_trace, tool_calls)
 }
 
-fn build_metadata(args: &RunArgs, total_rng_calls: u64, executed_runs: u32) -> model::RunMetadata {
+fn build_metadata(
+    args: &RunArgs,
+    total_rng_calls: u64,
+    executed_runs: u32,
+    nix_provenance: Option<model::NixProvenance>,
+) -> model::RunMetadata {
     let created_at = resolve_created_at(args);
     let git_rev = git_rev();
     let rustc_version = command_version("rustc");
@@ -748,6 +847,8 @@ fn build_metadata(args: &RunArgs, total_rng_calls: u64, executed_runs: u32) -> m
         &rustc_version,
         &cargo_version,
         &nix_store_path,
+        args.threads,
+        nix_provenance.as_ref(),
     );
 
     model::RunMetadata {
@@ -769,6 +870,8 @@ fn build_metadata(args: &RunArgs, total_rng_calls: u64, executed_runs: u32) -> m
             rustc_version,
             cargo_version,
             nix_store_path,
+            agent_threads: None,
+            nix_provenance,
             variability_factors,
         },
     }
@@ -778,6 +881,7 @@ fn build_agent_metadata(
     args: &RunArgs,
     total_rng_calls: u64,
     chaos_profile: chaos::ChaosProfile,
+    nix_provenance: Option<model::NixProvenance>,
 ) -> model::RunMetadata {
     let created_at = resolve_created_at(args);
     let git_rev = git_rev();
@@ -790,6 +894,8 @@ fn build_agent_metadata(
         &rustc_version,
         &cargo_version,
         &nix_store_path,
+        args.threads,
+        nix_provenance.as_ref(),
     );
 
     model::RunMetadata {
@@ -820,6 +926,8 @@ fn build_agent_metadata(
             rustc_version,
             cargo_version,
             nix_store_path,
+            agent_threads: Some(args.threads),
+            nix_provenance,
             variability_factors,
         },
     }
@@ -855,13 +963,7 @@ fn resolve_chaos_profile(args: &RunArgs, seed: u64) -> chaos::ChaosProfile {
     let drop_rate = args.fault_drop_rate.map(chaos::rate_to_per_million);
     let latency_rate = args.fault_latency_rate.map(chaos::rate_to_per_million);
 
-    chaos::with_overrides(
-        profile,
-        timeout_rate,
-        corrupt_rate,
-        drop_rate,
-        latency_rate,
-    )
+    chaos::with_overrides(profile, timeout_rate, corrupt_rate, drop_rate, latency_rate)
 }
 
 fn demo_chaos_profile(seed: u64, profile: FaultProfile, enabled: bool) -> chaos::ChaosProfile {
@@ -899,15 +1001,18 @@ fn run_demo_agent(
             created_at: None,
             agent: Some("clawdbot".to_string()),
             replay: None,
+            threads: 1,
             faults: FaultToggle::Off,
             fault_profile: FaultProfile::None,
             fault_timeout_rate: None,
             fault_corrupt_rate: None,
             fault_drop_rate: None,
             fault_latency_rate: None,
+            nix_provenance: nix_provenance::NixProvenanceMode::Off,
         },
         0,
         chaos_profile.clone(),
+        None,
     );
 
     let chaos_engine = if chaos_profile.enabled {
@@ -930,6 +1035,11 @@ fn run_demo_agent(
             prior_tool_outputs: prior_outputs.clone(),
         };
         let output = agent.step(input);
+        let output = if regress {
+            apply_demo_regression_to_output(step, output)
+        } else {
+            output
+        };
         agent_trace.push(agent::trace_entry_from_output(step, &output));
 
         for request in output.tool_requests {
@@ -942,33 +1052,30 @@ fn run_demo_agent(
         }
     }
 
-    let mut transcript = tool_transcript.into_record();
-    if regress {
-        apply_demo_regression(&mut transcript);
-    }
-
     Ok(DemoRun {
         metadata,
         chaos_profile,
         agent_trace,
-        transcript,
+        transcript: tool_transcript.into_record(),
     })
 }
 
-fn apply_demo_regression(transcript: &mut tooling::ToolTranscriptRecord) {
-    if let Some(call) = transcript.entries.first_mut() {
-        let output = match call.response.output.clone() {
-            serde_json::Value::Object(mut map) => {
-                map.insert("regressed".to_string(), serde_json::Value::Bool(true));
-                serde_json::Value::Object(map)
+fn apply_demo_regression_to_output(
+    step: u32,
+    mut output: agent::AgentOutput,
+) -> agent::AgentOutput {
+    if step == 0 {
+        if let Some(request) = output.tool_requests.get_mut(0) {
+            request.tool_name = "clawdbot.lookup.v2".to_string();
+            if let serde_json::Value::Object(map) = &mut request.arguments {
+                map.insert(
+                    "contract".to_string(),
+                    serde_json::Value::String("v2".to_string()),
+                );
             }
-            other => serde_json::json!({
-                "regressed": true,
-                "prior": other,
-            }),
-        };
-        call.response.output = output;
+        }
     }
+    output
 }
 
 fn parallel_strategy(parallel: bool) -> String {
@@ -997,6 +1104,8 @@ fn build_variability_factors(
     rustc_version: &Option<String>,
     cargo_version: &Option<String>,
     nix_store_path: &Option<String>,
+    agent_threads: usize,
+    nix_provenance: Option<&model::NixProvenance>,
 ) -> Vec<String> {
     let mut factors = Vec::new();
     if !created_at.is_empty() {
@@ -1013,6 +1122,12 @@ fn build_variability_factors(
     }
     if nix_store_path.is_some() {
         factors.push("nix_store_path".to_string());
+    }
+    if agent_threads > 1 {
+        factors.push("agent_threads".to_string());
+    }
+    if nix_provenance.is_some() {
+        factors.push("nix_provenance".to_string());
     }
     factors
 }

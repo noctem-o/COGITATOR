@@ -1,11 +1,13 @@
 use anyhow::Result;
 use serde::Serialize;
+use std::collections::HashMap;
 
 use crate::agent::AgentTraceEntry;
 use crate::canonical_json;
+use crate::chaos::FaultRecord;
 use crate::model::{RunMetadata, TraceEvent, WitnessedMetadata};
 use crate::tooling::{ToolCall, ToolRequest};
-use crate::chaos::FaultRecord;
+use crate::witness;
 
 pub fn encode_metadata(metadata: &RunMetadata) -> Result<Vec<u8>> {
     to_canonical_json(metadata)
@@ -28,13 +30,17 @@ pub fn encode_tool_call(call: &ToolCall) -> Result<Vec<u8>> {
     to_canonical_json(&witness_call)
 }
 
-pub fn tool_call_witness_value(call: &ToolCall) -> Result<serde_json::Value> {
+pub fn tool_call_witness_value_canonical(call: &ToolCall) -> Result<serde_json::Value> {
     let witness_call = ToolCallWitness::from(call);
-    Ok(serde_json::to_value(witness_call)?)
+    let value = serde_json::to_value(&witness_call)?;
+    debug_assert_no_floats(&value);
+    canonical_json::to_value(&witness_call)
 }
 
 fn to_canonical_json<T: Serialize>(value: &T) -> Result<Vec<u8>> {
-    canonical_json::to_vec(value)
+    let value = serde_json::to_value(value)?;
+    debug_assert_no_floats(&value);
+    canonical_json::to_vec(&value)
 }
 
 #[derive(Serialize)]
@@ -66,5 +72,58 @@ impl From<&ToolCall> for ToolCallWitness {
             },
             fault: call.fault.clone(),
         }
+    }
+}
+
+pub fn compute_agent_witness_root(
+    metadata: &WitnessedMetadata,
+    agent_trace: &[AgentTraceEntry],
+    tool_calls: &[ToolCall],
+) -> Result<String> {
+    let metadata_bytes = encode_witnessed_metadata(metadata)?;
+    let mut witness = witness::Witness::new(&metadata_bytes)?;
+    let mut calls_by_step = index_tool_calls_by_step(tool_calls);
+    for calls in calls_by_step.values_mut() {
+        calls.sort_by_key(|call| call.tool_call_idx);
+    }
+
+    for entry in agent_trace {
+        let entry_bytes = encode_agent_trace_entry(entry)?;
+        witness.update(&entry_bytes)?;
+        if let Some(calls) = calls_by_step.get_mut(&entry.step) {
+            for call in calls.iter() {
+                let call_bytes = encode_tool_call(call)?;
+                witness.update(&call_bytes)?;
+            }
+        }
+    }
+
+    Ok(witness.finalize_hex())
+}
+
+pub fn index_tool_calls_by_step<'a>(tool_calls: &'a [ToolCall]) -> HashMap<u32, Vec<&'a ToolCall>> {
+    let mut map: HashMap<u32, Vec<&ToolCall>> = HashMap::new();
+    for call in tool_calls {
+        map.entry(call.step).or_default().push(call);
+    }
+    map
+}
+
+fn debug_assert_no_floats(value: &serde_json::Value) {
+    #[cfg(debug_assertions)]
+    {
+        if contains_float(value) {
+            panic!("witnessed artifact contains floating-point number");
+        }
+    }
+}
+
+#[cfg(debug_assertions)]
+fn contains_float(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Number(num) => num.is_f64(),
+        serde_json::Value::Array(values) => values.iter().any(contains_float),
+        serde_json::Value::Object(map) => map.values().any(contains_float),
+        _ => false,
     }
 }

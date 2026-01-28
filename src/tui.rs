@@ -114,6 +114,9 @@ pub fn launch(
                 Line::from(format!("analysis.json → {}", manifest.analysis_json)),
                 Line::from(format!("witness_root.txt → {}", manifest.witness_root_txt)),
             ];
+            if let Some(path) = &manifest.nix_provenance_json {
+                artifact_text.push(Line::from(format!("nix_provenance.json → {}", path)));
+            }
             if let Some(path) = &manifest.agent_trace_json {
                 artifact_text.push(Line::from(format!("agent_trace.json → {}", path)));
             }
