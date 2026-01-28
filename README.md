@@ -70,6 +70,7 @@ cargo build --release
 PowerShell equivalent (native Windows builds use `.exe` and backslashes):
 
 ```powershell
+.\target\release\cogitator.exe run --seed 42 --runs 10 --out-dir out --clean
 .\target\release\cogitator.exe verify --meta out\meta.json --trace out\trace.jsonl --expect (Get-Content out\witness_root.txt).Trim()
 ```
 
