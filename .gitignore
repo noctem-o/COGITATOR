@@ -1,1 +1,4 @@
-/target
+out/
+demo_out/
+replay/
+target/
