@@ -43,6 +43,7 @@ pub struct ArtifactManifest {
     pub summary_json: String,
     pub witness_root_txt: String,
     pub analysis_json: String,
+    pub nix_provenance_json: Option<String>,
     pub agent_trace_json: Option<String>,
     pub tool_transcript_json: Option<String>,
     pub witness_manifest_json: Option<String>,
@@ -91,10 +92,21 @@ pub struct ProvenanceMetadata {
     pub rustc_version: Option<String>,
     pub cargo_version: Option<String>,
     pub nix_store_path: Option<String>,
+    pub agent_threads: Option<usize>,
+    pub nix_provenance: Option<NixProvenance>,
     pub variability_factors: Vec<String>,
 }
 
-pub const WITNESS_MANIFEST_SCHEMA_VERSION: u32 = 2;
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NixProvenance {
+    pub nix_version: Option<String>,
+    pub nixos_version: Option<String>,
+    pub flake_metadata: Option<serde_json::Value>,
+    pub current_system: Option<serde_json::Value>,
+}
+
+pub const WITNESS_MANIFEST_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -119,6 +131,7 @@ pub struct WitnessManifest {
     pub hash_chain_txt: String,
     pub chaos_profile_json: Option<String>,
     pub witness_root_txt: Option<String>,
+    pub nix_provenance_json: Option<String>,
     pub artifact_hashes: std::collections::BTreeMap<String, String>,
     pub bundle_hash: String,
     pub replay_source: Option<String>,

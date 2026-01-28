@@ -7,6 +7,80 @@
   "properties": {
     "schema_version": { "type": "integer", "minimum": 1 },
     "drifted": { "type": "boolean" },
-    "issues": { "type": "array", "items": { "type": "string" } }
+    "issues": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "expected", "actual"],
+            "properties": {
+              "kind": { "const": "tool_call_count_mismatch" },
+              "expected": { "type": "integer", "minimum": 0 },
+              "actual": { "type": "integer", "minimum": 0 }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "index", "expected", "actual"],
+            "properties": {
+              "kind": { "const": "tool_step_mismatch" },
+              "index": { "type": "integer", "minimum": 0 },
+              "expected": { "type": "integer", "minimum": 0 },
+              "actual": { "type": "integer", "minimum": 0 }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "index"],
+            "properties": {
+              "kind": { "const": "tool_request_mismatch" },
+              "index": { "type": "integer", "minimum": 0 }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "index", "expected", "actual"],
+            "properties": {
+              "kind": { "const": "tool_call_index_mismatch" },
+              "index": { "type": "integer", "minimum": 0 },
+              "expected": { "type": "integer", "minimum": 0 },
+              "actual": { "type": "integer", "minimum": 0 }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "index"],
+            "properties": {
+              "kind": { "const": "tool_fault_mismatch" },
+              "index": { "type": "integer", "minimum": 0 }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "index"],
+            "properties": {
+              "kind": { "const": "tool_response_hash_mismatch" },
+              "index": { "type": "integer", "minimum": 0 }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "index"],
+            "properties": {
+              "kind": { "const": "unexpected_tool_request" },
+              "index": { "type": "integer", "minimum": 0 }
+            }
+          }
+        ]
+      }
+    }
   }
 }

@@ -10,6 +10,10 @@ pub const CHAOS_SCHEDULE_VERSION: u32 = 1;
 const PER_MILLION: u64 = 1_000_000;
 const LATENCY_MIN_MS: u64 = 5;
 const LATENCY_MAX_MS: u64 = 250;
+const FAULT_KIND_TIMEOUT: &str = "timeout";
+const FAULT_KIND_DROP: &str = "drop";
+const FAULT_KIND_CORRUPT: &str = "corrupt";
+const FAULT_KIND_LATENCY_SIM: &str = "latency_sim";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -83,73 +87,95 @@ impl ChaosEngine {
         &self.profile
     }
 
-    pub fn decide_fault(
-        &self,
-        step: u32,
-        tool_call_idx: u32,
-        domain: &str,
-    ) -> Option<FaultRecord> {
+    pub fn decide_fault(&self, step: u32, tool_call_idx: u32, domain: &str) -> Option<FaultRecord> {
+        // Fault selection uses a single deterministic draw. Rates are cumulative, and the
+        // decision falls into the first category whose cumulative weight exceeds the draw.
         if !self.profile.enabled {
             return None;
         }
-        let candidates = [
-            (FaultKind::Timeout, self.profile.rates.timeout_per_million),
-            (FaultKind::Drop, self.profile.rates.drop_per_million),
-            (FaultKind::Corrupt, self.profile.rates.corrupt_per_million),
-            (FaultKind::LatencySim, self.profile.rates.latency_sim_per_million),
-        ];
+        let total = self.profile.rates.timeout_per_million as u64
+            + self.profile.rates.drop_per_million as u64
+            + self.profile.rates.corrupt_per_million as u64
+            + self.profile.rates.latency_sim_per_million as u64;
 
-        for (kind, rate) in candidates {
-            if rate == 0 {
-                continue;
-            }
-            let decision = hash_u64(
-                self.profile.seed,
-                self.run_id,
-                step,
-                tool_call_idx,
-                domain,
-                &format!("{:?}", kind),
-            );
-            if decision % PER_MILLION < rate as u64 {
-                let params = match kind {
-                    FaultKind::Corrupt => FaultParams {
-                        mask: Some(hash_u64(
-                            self.profile.seed,
-                            self.run_id,
-                            step,
-                            tool_call_idx,
-                            domain,
-                            "corrupt_mask",
-                        )),
-                        latency_ms: None,
-                    },
-                    FaultKind::LatencySim => FaultParams {
-                        mask: None,
-                        latency_ms: Some(latency_value(
-                            self.profile.seed,
-                            self.run_id,
-                            step,
-                            tool_call_idx,
-                            domain,
-                        )),
-                    },
-                    _ => FaultParams {
-                        mask: None,
-                        latency_ms: None,
-                    },
-                };
-                return Some(FaultRecord {
-                    kind,
-                    step,
-                    tool_call_idx,
-                    domain: domain.to_string(),
-                    params,
-                });
-            }
+        if total == 0 {
+            return None;
         }
 
-        None
+        let decision = hash_u64(
+            self.profile.seed,
+            self.run_id,
+            step,
+            tool_call_idx,
+            domain,
+            "fault_select",
+        ) % PER_MILLION;
+
+        if decision >= total {
+            return None;
+        }
+
+        let mut cursor = self.profile.rates.timeout_per_million as u64;
+        let (kind, params) = if decision < cursor {
+            (
+                FaultKind::Timeout,
+                FaultParams {
+                    mask: None,
+                    latency_ms: None,
+                },
+            )
+        } else {
+            cursor += self.profile.rates.drop_per_million as u64;
+            if decision < cursor {
+                (
+                    FaultKind::Drop,
+                    FaultParams {
+                        mask: None,
+                        latency_ms: None,
+                    },
+                )
+            } else {
+                cursor += self.profile.rates.corrupt_per_million as u64;
+                if decision < cursor {
+                    (
+                        FaultKind::Corrupt,
+                        FaultParams {
+                            mask: Some(hash_u64(
+                                self.profile.seed,
+                                self.run_id,
+                                step,
+                                tool_call_idx,
+                                domain,
+                                fault_kind_key(FaultKind::Corrupt),
+                            )),
+                            latency_ms: None,
+                        },
+                    )
+                } else {
+                    (
+                        FaultKind::LatencySim,
+                        FaultParams {
+                            mask: None,
+                            latency_ms: Some(latency_value(
+                                self.profile.seed,
+                                self.run_id,
+                                step,
+                                tool_call_idx,
+                                domain,
+                            )),
+                        },
+                    )
+                }
+            }
+        };
+
+        Some(FaultRecord {
+            kind,
+            step,
+            tool_call_idx,
+            domain: domain.to_string(),
+            params,
+        })
     }
 }
 
@@ -264,20 +290,36 @@ fn latency_value(seed: u64, run_id: u32, step: u32, tool_call_idx: u32, domain: 
         step,
         tool_call_idx,
         domain,
-        "latency",
+        fault_kind_key(FaultKind::LatencySim),
     );
     let span = LATENCY_MAX_MS - LATENCY_MIN_MS + 1;
     LATENCY_MIN_MS + (base % span)
+}
+
+fn fault_kind_key(kind: FaultKind) -> &'static str {
+    match kind {
+        FaultKind::Timeout => FAULT_KIND_TIMEOUT,
+        FaultKind::Drop => FAULT_KIND_DROP,
+        FaultKind::Corrupt => FAULT_KIND_CORRUPT,
+        FaultKind::LatencySim => FAULT_KIND_LATENCY_SIM,
+    }
 }
 
 fn corrupt_value(value: serde_json::Value, mask: u64) -> serde_json::Value {
     match value {
         serde_json::Value::String(mut s) => {
             if !s.is_empty() {
-                let idx = (mask as usize) % s.len();
-                let mut bytes = s.into_bytes();
-                bytes[idx] ^= 0x1;
-                s = String::from_utf8_lossy(&bytes).to_string();
+                let bytes = s.as_bytes();
+                let ascii_positions: Vec<usize> = bytes
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(idx, b)| b.is_ascii().then_some(idx))
+                    .collect();
+                if let Some(&idx) = ascii_positions.get((mask as usize) % ascii_positions.len()) {
+                    let mut bytes = bytes.to_vec();
+                    bytes[idx] ^= 0x1;
+                    s = String::from_utf8(bytes).unwrap_or(s);
+                }
             }
             serde_json::Value::String(s)
         }
@@ -286,11 +328,6 @@ fn corrupt_value(value: serde_json::Value, mask: u64) -> serde_json::Value {
                 serde_json::Value::Number((n ^ (mask as i64 & 0xFF)).into())
             } else if let Some(n) = num.as_u64() {
                 serde_json::Value::Number((n ^ (mask as u64 & 0xFF)).into())
-            } else if let Some(n) = num.as_f64() {
-                let delta = (mask as i64 % 7) as f64;
-                serde_json::Value::Number(
-                    serde_json::Number::from_f64(n + delta).unwrap_or(num),
-                )
             } else {
                 serde_json::Value::Number(num)
             }

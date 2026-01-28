@@ -3,8 +3,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::Path;
 
-use crate::chaos::{apply_fault, ChaosEngine, FaultRecord};
 use crate::canonical_json;
+use crate::chaos::{apply_fault, ChaosEngine, FaultRecord};
+use crate::report::DriftIssue;
 
 pub const TOOL_TRANSCRIPT_SCHEMA_VERSION: u32 = 2;
 
@@ -56,7 +57,7 @@ pub struct ToolTranscript {
     expected: Vec<ToolCall>,
     recorded: Vec<ToolCall>,
     cursor: usize,
-    mismatches: Vec<String>,
+    mismatches: Vec<DriftIssue>,
     chaos: Option<ChaosEngine>,
     next_call_idx: u32,
 }
@@ -90,7 +91,7 @@ impl ToolTranscript {
         self.mode.clone()
     }
 
-    pub fn mismatches(&self) -> &[String] {
+    pub fn mismatches(&self) -> &[DriftIssue] {
         &self.mismatches
     }
 
@@ -106,8 +107,7 @@ impl ToolTranscript {
                     None
                 };
                 if let Some(fault_record) = fault.as_ref() {
-                    response =
-                        apply_fault(&request, response, fault_record).unwrap_or(response);
+                    response = apply_fault(&request, response, fault_record).unwrap_or(response);
                 }
                 self.recorded.push(ToolCall {
                     step,
@@ -121,25 +121,29 @@ impl ToolTranscript {
             ToolMode::Replay => {
                 let response = if let Some(expected) = self.expected.get(self.cursor) {
                     if expected.step != step {
-                        self.mismatches.push(format!(
-                            "tool step mismatch: expected {}, got {}",
-                            expected.step, step
-                        ));
+                        self.mismatches.push(DriftIssue::ToolStepMismatch {
+                            index: self.cursor as u32,
+                            expected: expected.step,
+                            actual: step,
+                        });
                     }
                     if expected.tool_call_idx != tool_call_idx {
-                        self.mismatches.push(format!(
-                            "tool call index mismatch: expected {}, got {}",
-                            expected.tool_call_idx, tool_call_idx
-                        ));
+                        self.mismatches.push(DriftIssue::ToolCallIndexMismatch {
+                            index: self.cursor as u32,
+                            expected: expected.tool_call_idx,
+                            actual: tool_call_idx,
+                        });
                     }
                     if expected.request != request {
-                        self.mismatches
-                            .push(format!("tool request mismatch at index {}", self.cursor));
+                        self.mismatches.push(DriftIssue::ToolRequestMismatch {
+                            index: self.cursor as u32,
+                        });
                     }
                     expected.response.clone()
                 } else {
-                    self.mismatches
-                        .push(format!("unexpected tool request at index {}", self.cursor));
+                    self.mismatches.push(DriftIssue::UnexpectedToolRequest {
+                        index: self.cursor as u32,
+                    });
                     stub_response(&request)
                 };
                 self.recorded.push(ToolCall {
@@ -193,7 +197,7 @@ pub fn write_transcript(path: &Path, record: &ToolTranscriptRecord) -> Result<()
 
 fn stub_response(request: &ToolRequest) -> ToolResponse {
     let mut hasher = Sha256::new();
-    if let Ok(bytes) = serde_json::to_vec(request) {
+    if let Ok(bytes) = canonical_json::to_vec(request) {
         hasher.update(bytes);
     }
     let digest = hasher.finalize();

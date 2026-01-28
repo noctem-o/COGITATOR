@@ -18,10 +18,16 @@ pub fn to_vec<T: Serialize>(value: &T) -> Result<Vec<u8>> {
     Ok(buffer)
 }
 
+pub fn to_value<T: Serialize>(value: &T) -> Result<Value> {
+    let bytes = to_vec(value)?;
+    let value: Value =
+        serde_json::from_slice(&bytes).context("deserialize canonical json value")?;
+    Ok(value)
+}
+
 pub fn write_json<T: Serialize>(path: &Path, value: &T, label: &str) -> Result<()> {
     let bytes = to_vec(value)?;
-    let mut file =
-        File::create(path).with_context(|| format!("failed to create {}", label))?;
+    let mut file = File::create(path).with_context(|| format!("failed to create {}", label))?;
     file.write_all(&bytes)
         .with_context(|| format!("failed to write {}", label))?;
     file.write_all(b"\n")
@@ -42,9 +48,7 @@ fn canonicalize_value(value: Value) -> Value {
             }
             Value::Object(output)
         }
-        Value::Array(values) => {
-            Value::Array(values.into_iter().map(canonicalize_value).collect())
-        }
+        Value::Array(values) => Value::Array(values.into_iter().map(canonicalize_value).collect()),
         other => other,
     }
 }
