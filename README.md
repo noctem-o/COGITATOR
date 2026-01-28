@@ -8,7 +8,6 @@
                  
 
 
-
 Deterministic evaluation harnesses, cryptographic witness roots, and replayable agent runs.
 Cogitator captures full causal traces, records entropy usage (when applicable), and produces
 byte-stable artifacts so third parties can verify the same results from the same inputs and
