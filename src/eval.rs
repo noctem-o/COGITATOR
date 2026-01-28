@@ -35,7 +35,7 @@ pub fn run_parallel(seed: u64, run_ids: &[u32]) -> Vec<CaseResult> {
 /// Run evaluation with a canonical trace and entropy accounting.
 pub fn run_with_trace(seed: u64, run_ids: &[u32], parallel: bool) -> RunOutput {
     let n = run_ids.len();
-    let mut runs: Vec<Option<CaseRun>> = vec![None; n];
+    let mut runs: Vec<Option<CaseRun>> = (0..n).map(|_| None).collect();
 
     if parallel {
         runs.par_iter_mut().enumerate().for_each(|(i, slot)| {

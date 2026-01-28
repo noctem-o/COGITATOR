@@ -41,6 +41,11 @@ pub struct ArtifactManifest {
     pub summary_json: String,
     pub witness_root_txt: String,
     pub analysis_json: String,
+    pub agent_trace_json: Option<String>,
+    pub tool_transcript_json: Option<String>,
+    pub witness_manifest_json: Option<String>,
+    pub hash_chain_txt: Option<String>,
+    pub drift_report_json: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -83,6 +88,23 @@ pub struct ProvenanceMetadata {
     pub cargo_version: Option<String>,
     pub nix_store_path: Option<String>,
     pub variability_factors: Vec<String>,
+}
+
+pub const WITNESS_MANIFEST_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WitnessManifest {
+    pub schema_version: u32,
+    pub run_id: u32,
+    pub agent: String,
+    pub mode: String,
+    pub meta_json: String,
+    pub agent_trace_json: String,
+    pub tool_transcript_json: String,
+    pub drift_report_json: String,
+    pub hash_chain_txt: String,
+    pub replay_source: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
