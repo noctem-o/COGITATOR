@@ -13,6 +13,72 @@ reproducible the way git makes code reproducible. It captures full causal traces
 entropy usage where applicable, and packages run artifacts so that third parties can
 recompute the same witness root from the same inputs and environment.
 
+## Requirements
+
+- Rust toolchain (via `rustup`) with Cargo.
+- A C/C++ compiler toolchain for building Rust dependencies.
+- Git (optional but recommended for cloning).
+
+## Install prerequisites (by OS)
+
+### Linux (Debian/Ubuntu)
+
+```bash
+sudo apt-get update
+sudo apt-get install -y build-essential curl git
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+### Linux (Fedora/RHEL)
+
+```bash
+sudo dnf install -y gcc gcc-c++ make curl git
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+### Linux (Arch)
+
+```bash
+sudo pacman -S --needed base-devel curl git
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+### macOS
+
+```bash
+xcode-select --install
+brew install rustup git
+rustup-init
+```
+
+### Windows
+
+**Option A: Native Windows**
+
+1. Install the [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/).
+2. Install Rust via [rustup](https://rustup.rs/).
+3. Open a new PowerShell and verify:
+
+```powershell
+rustc --version
+cargo --version
+```
+
+**Option B: WSL2 (recommended for a Linux-like workflow)**
+
+```bash
+sudo apt-get update
+sudo apt-get install -y build-essential curl git
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+## Build and run
+
+```bash
+cargo build
+./target/debug/cogitator --help
+```
+
 ## Feature list
 
 - **Deterministic execution** with explicit entropy accounting (where applicable) and ordered
