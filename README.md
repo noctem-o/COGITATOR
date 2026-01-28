@@ -1,234 +1,108 @@
-```text
-   ██████╗  ██████╗  ██████╗ ██╗████████╗ █████╗ ████████╗ ██████╗ ██████╗
-  ██╔════╝ ██╔═══██╗██╔════╝ ██║╚══██╔══╝██╔══██╗╚══██╔══╝██╔═══██╗██╔══██╗
-  ██║      ██║   ██║██║  ███╗██║   ██║   ███████║   ██║   ██║   ██║██████╔╝
-  ██║      ██║   ██║██║   ██║██║   ██║   ██╔══██║   ██║   ██║   ██║██╔══██╗
-  ╚██████╗ ╚██████╔╝╚██████╔╝██║   ██║   ██║  ██║   ██║   ╚██████╔╝██║  ██║
-   ╚═════╝  ╚═════╝  ╚═════╝ ╚═╝   ╚═╝   ╚═╝  ╚═╝   ╚═╝    ╚═════╝ ╚═╝  ╚═╝
+# Cogitator
 
+Cogitator is a deterministic evaluation harness with cryptographic witness roots that make
+agent runs replayable, auditable, and verifiable. It captures full causal traces, tracks
+entropy usage, and packages run artifacts so that third parties can recompute the same
+witness root from the same inputs and environment.
 
+## What’s new in this repo
 
-Cogitator is a deterministic execution  
-and witnessed-telemetry framework  
-for scientifically auditable evaluation  
-of autonomous cyber defence systems.
+This implementation expands on the original paper with additional operational features:
 
-Autonomous cyber agents are increasingly powerful.  
-But their evaluation is fragile.
+- **Agent-mode execution** with deterministic tool transcripts and replay support.
+- **Drift detection** that compares replayed tool calls against recorded transcripts.
+- **Witness bundles** that package agent traces, tool transcripts, and hash chains for
+  independent verification.
+- **Hash-chain auditing** for agent traces + tool calls, separate from the main witness root.
+- **Optional TUI** for inspecting run summaries and agent traces (feature-flagged).
 
-Stochastic inference drifts.  
-Tool interfaces introduce nondeterminism.  
-Parallel execution scrambles ordering.  
-Logs are easy to fake after the fact.
+## Key capabilities
 
-Cogitator treats an evaluation run  
-as a deterministic program.
+- **Deterministic execution** with explicit entropy accounting and ordered trace emission.
+- **Witness roots** (BLAKE3) that commit to every event in a run’s trace.
+- **Reproducible run metadata** capturing seed, run counts, parallel strategy, and provenance.
+- **Artifact manifests** for programmatic consumption of outputs.
 
-The full event trace is committed  
-to a cryptographic witness root.
+## CLI overview
 
-This enables rebuildable, replayable,  
-third-party verification.
+Build and run:
 
----
+```bash
+cargo build
+./target/debug/cogitator --help
+```
 
-## Core invariant
+### Run deterministic evaluations
 
-Same environment  
-+ same input  
-+ same seed  
+```bash
+./target/debug/cogitator run --seed 42 --runs 100 --out-dir out
+```
 
-→ same trajectory  
-→ same witness root
+Outputs include:
 
-Cogitator replaces narrative logs  
-with verifiable execution commitments.
+- `meta.json` – run metadata (witnessed + provenance)
+- `trace.jsonl` – canonical trace events
+- `results.csv` / `results.json` – case-level results
+- `summary.json` – aggregate metrics
+- `analysis.json` – bundled metadata + summary + results
+- `witness_root.txt` – final witness root for the run
 
----
+### Run agent mode (with tool transcripts)
 
-## Key contributions
+```bash
+./target/debug/cogitator run --agent clawdbot --runs 1 --out-dir out
+```
 
-Cogitator provides:
+Agent-mode produces a per-run directory (`out/run_0000/`) with:
 
-- Deterministic execution kernel  
-  for agentic cyber evaluation  
+- `agent_trace.json` – agent decisions per step
+- `tool_transcript.json` – tool calls and deterministic stub outputs
+- `hash_chain.txt` – chained hashes over agent traces + tool calls
+- `drift_report.json` – drift status and mismatches
+- `witness_manifest.json` – pointers to all per-run artifacts
 
-- Cryptographic witness chains  
-  committing to full causal traces  
+### Replay an agent run
 
-- Explicit entropy budgeting  
-  to make randomness measurable  
+```bash
+./target/debug/cogitator run --agent clawdbot --case 0 --replay out/run_0000 --out-dir replay
+```
 
-- Reproducible evaluation environments  
-  grounded in NixOS derivations  
+Replay reuses the prior tool transcript and emits a drift report showing any deviations.
 
-- Standalone verification of traces  
-  via witness recomputation  
+### Verify witness roots
 
----
+Verify a trace against an expected witness root:
 
-## Witness chains
+```bash
+./target/debug/cogitator verify --meta out/meta.json --trace out/trace.jsonl --expect <root>
+```
 
-Every execution event updates  
-a sequential cryptographic commitment:
+Verify a witness bundle (agent mode):
 
-h_0     = BLAKE3(“COGITATOR” || witnessed_metadata)
-h_{t+1} = BLAKE3(h_t || encode(event_t))
+```bash
+./target/debug/cogitator verify --witness out/run_0000
+```
 
-The final value is:
+## TUI support
 
-`witness_root = h_T`
+The TUI is feature-gated. Enable it with:
 
-It commits to the entire run history.
-Provenance (created_at, toolchain versions, git metadata)
-is recorded in meta.json but excluded from the witness root.
+```bash
+cargo run --features tui -- run --runs 10
+```
 
-Any insertion, deletion, mutation,  
-or reordering changes the witness root.
+Use `--no-tui` to suppress the interface when running in CI or headless contexts.
 
----
+## Project layout
 
-## Entropy budgeting
-
-Agent evaluations often hide randomness.
-
-Sampling temperatures.  
-Planner branches.  
-Tool timeouts.  
-Scheduler jitter.
-
-Cogitator treats randomness  
-as an audited resource.
-
-- entropy sources declared in witnessed metadata  
-- consumption recorded in the trace  
-- evaluations comparable across models  
-
-Randomness becomes measurable.  
-Not implicit.
-
----
-
-## Reproducibility via NixOS
-
-Cogitator is designed  
-for reproducible NixOS environments.
-
-This enables:
-
-- pinned dependency graphs  
-- hermetic toolchains  
-- rebuildable experiments  
-- bit-identical evaluation pipelines  
-- third-party verifiable re-execution  
-
-Published results can be reproduced  
-from a flake lock.
-
-They can be verified  
-by recomputing the witness root.
-
----
-
-## Artifact bundle (planned)
-
-The Cogitator release will include:
-
-- Nix flake pinning dependencies  
-  and runtimes  
-
-- Deterministic kernel  
-  and tool wrappers  
-
-- Canonical trace schema specification  
-
-- Standalone verifier  
-  for witness root recomputation  
-
-- Regression suite  
-  demonstrating stable witness roots  
-
----
-
-## Threat model
-
-Cogitator addresses:
-
-- accidental nondeterminism  
-  (parallelism, scheduling drift)  
-
-- post-hoc log editing  
-  or trace fabrication  
-
-Cogitator does not defend against:
-
-- fully malicious host substrates  
-  (compromised hypervisors or OS)  
-
-The goal is scientific auditability  
-under declared pinned environments.
-
----
-
-## Status
-
-Cogitator is an active research project.
-
-This repository is intended  
-as the reference implementation  
-accompanying the Cogitator paper  
-and artifact release.
-
----
-
-## Paper alignment (implementation status)
-
-This repository is a **minimal reference implementation** meant to exercise the
-core mechanisms described in the paper while keeping the codebase small and
-auditable. The following items map the paper claims to the current code:
-
-- **Deterministic seed schedule (SHA-256)**: Implemented via `hash_seed` using
-  `SHA-256(seed || run_id)` with a per-run PRNG seed derived from the first
-  eight bytes. (See `eval.rs`.)  
-- **Witness chains (BLAKE3)**: Implemented exactly as specified:
-  `BLAKE3("COGITATOR" || witnessed_metadata)` then
-  `BLAKE3(prev || encode(event))`, producing `witness_root`. (See `witness.rs`
-  and `main.rs`.)  
-- **Canonical event encoding**: Events/metadata are serialized with compact,
-  deterministic JSON via `serde_json` on fixed-structure structs. This ensures
-  stable field ordering for the current schema, but does **not** yet implement
-  a standalone canonicalization spec (e.g., explicit type tags or normalized
-  float rendering beyond serde defaults). (See `trace.rs`.)  
-- **Entropy accounting**: Each event records `entropy_bits` and `rng_calls`,
-  and metadata records `total_rng_calls` and `entropy_sources`. A hard entropy
-  budget is **not** enforced yet. (See `eval.rs` and `model.rs`.)  
-- **Parallel determinism**: Parallel execution is supported with deterministic
-  ordering by `(run_id, step)` in the canonical trace. (See `eval.rs`.)  
-- **NixOS reproducibility**: The README/paper discuss NixOS-derived
-  reproducibility. The current codebase only records optional Nix-related
-  metadata (e.g., `NIX_STORE`) and does **not** ship a flake or pinned toolchain.
-  This is planned work. (See `main.rs`.)
-
-
-## References
-
-- Guo et al.  
-  *R2: Record and Replay at the Application Level.*  
-  OSDI 2008  
-
-- Malka et al.  
-  *Functional Package Management Enables Reproducible Builds at Scale.*  
-  arXiv 2025  
-
-- Aumasson et al.  
-  *The BLAKE3 Hashing Framework.*  
-  IETF draft 2024  
-
-- Trillian  
-  Merkle-tree-backed verifiable logs  
-  transparency.dev  
-
----
+- `src/main.rs` – CLI entrypoint and artifact orchestration
+- `src/eval.rs` – deterministic evaluation harness
+- `src/witness.rs` – witness root builder
+- `src/verify.rs` – trace verification
+- `src/agent.rs` – example deterministic agent implementation
+- `src/tooling.rs` – tool transcript recording/replay
+- `src/drift.rs` – drift detection + witness bundle verification
+- `src/tui.rs` – terminal UI (feature gated)
 
 ## License
 
