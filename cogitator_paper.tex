@@ -28,6 +28,11 @@ enter witnessed commitments. The witness bundle hash additionally commits to all
 artifacts (including optional provenance artifacts like \texttt{nix\_provenance.json})
 for offline verification.
 
+LLM inference is modeled as a tool call: in live mode, responses are recorded into the
+tool transcript, and in replay mode those responses are replayed verbatim to preserve
+determinism. The default backend is a deterministic stub, so no model installation or
+network access is required unless explicitly enabled.
+
 \section{Related work}
 \label{sec:related}
 

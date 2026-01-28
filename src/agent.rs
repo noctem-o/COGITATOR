@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use crate::llm;
 use crate::tooling::ToolRequest;
 
 #[derive(Debug, Clone)]
@@ -9,6 +10,23 @@ pub struct AgentInput {
     pub step: u32,
     pub seed: u64,
     pub prior_tool_outputs: Vec<crate::tooling::ToolResponse>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LlmConfig {
+    pub enabled: bool,
+    pub model: String,
+    pub seed: Option<u64>,
+}
+
+impl Default for LlmConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            model: "stub".to_string(),
+            seed: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,11 +56,12 @@ pub trait Agent {
 #[derive(Debug, Clone)]
 pub struct ClawdbotAgent {
     seed: u64,
+    llm: LlmConfig,
 }
 
 impl ClawdbotAgent {
-    pub fn new(seed: u64) -> Self {
-        Self { seed }
+    pub fn new(seed: u64, llm: LlmConfig) -> Self {
+        Self { seed, llm }
     }
 }
 
@@ -59,10 +78,27 @@ impl Agent for ClawdbotAgent {
                     "hint": case_hint,
                 }),
             };
+            let mut tool_requests = vec![tool_request];
+            if self.llm.enabled {
+                let llm_request = llm::LlmRequest {
+                    schema_version: llm::LLM_REQUEST_SCHEMA_VERSION,
+                    model: self.llm.model.clone(),
+                    messages: vec![llm::LlmMessage {
+                        role: "user".to_string(),
+                        content: format!("Case hint: {}", case_hint),
+                    }],
+                    temperature: None,
+                    max_tokens: None,
+                    seed: self.llm.seed,
+                };
+                if let Ok(request) = llm::make_tool_request(&llm_request) {
+                    tool_requests.push(request);
+                }
+            }
             AgentOutput {
                 thought: "Scan the case context for deterministic signals.".to_string(),
                 action: "Request structured lookup.".to_string(),
-                tool_requests: vec![tool_request],
+                tool_requests,
                 is_final: false,
             }
         } else {
