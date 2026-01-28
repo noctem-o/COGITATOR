@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Cogitator Drift Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "drifted", "issues"],
+  "properties": {
+    "schema_version": { "type": "integer", "minimum": 1 },
+    "drifted": { "type": "boolean" },
+    "issues": { "type": "array", "items": { "type": "string" } }
+  }
+}

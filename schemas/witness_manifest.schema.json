@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Cogitator Witness Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "agent",
+    "mode",
+    "meta_json",
+    "agent_trace_json",
+    "tool_transcript_json",
+    "drift_report_json",
+    "hash_chain_txt"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "minimum": 1 },
+    "run_id": { "type": "integer", "minimum": 0 },
+    "agent": { "type": "string" },
+    "mode": { "type": "string", "enum": ["live", "replay"] },
+    "meta_json": { "type": "string" },
+    "agent_trace_json": { "type": "string" },
+    "tool_transcript_json": { "type": "string" },
+    "drift_report_json": { "type": "string" },
+    "hash_chain_txt": { "type": "string" },
+    "replay_source": { "type": ["string", "null"] }
+  }
+}

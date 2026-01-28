@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Cogitator Tool Transcript",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "mode", "entries"],
+  "properties": {
+    "schema_version": { "type": "integer", "minimum": 1 },
+    "mode": { "type": "string", "enum": ["live", "replay"] },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["step", "request", "response"],
+        "properties": {
+          "step": { "type": "integer", "minimum": 0 },
+          "request": { "type": "object" },
+          "response": { "type": "object" }
+        }
+      }
+    }
+  }
+}
