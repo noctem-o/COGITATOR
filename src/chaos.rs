@@ -93,11 +93,11 @@ impl ChaosEngine {
         if !self.profile.enabled {
             return None;
         }
-        let total = self.profile.rates.timeout_per_million as u64
+        let total_raw = self.profile.rates.timeout_per_million as u64
             + self.profile.rates.drop_per_million as u64
             + self.profile.rates.corrupt_per_million as u64
             + self.profile.rates.latency_sim_per_million as u64;
-        let total = total.min(PER_MILLION);
+        let total = total_raw.min(PER_MILLION);
 
         if total == 0 {
             return None;
@@ -316,6 +316,8 @@ fn corrupt_value(value: serde_json::Value, mask: u64) -> serde_json::Value {
                     .enumerate()
                     .filter_map(|(idx, b)| b.is_ascii().then_some(idx))
                     .collect();
+                // If the string contains no ASCII bytes, avoid modulo by zero and
+                // leave it unchanged (still deterministic).
                 if ascii_positions.is_empty() {
                     return serde_json::Value::String(s);
                 }

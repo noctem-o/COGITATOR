@@ -197,9 +197,9 @@ Cogitator can deterministically inject tool faults (timeouts, corruptions, drops
 latency simulations). Faults are driven by a seeded schedule and recorded in tool
 transcripts so that record + replay is byte-stable. Simulated latency is exposed to the
 agent but excluded from witness commitments by default. Fault selection uses a single
-seeded draw with cumulative per-million weights in fixed priority order (timeout → drop
-→ corrupt → latency_sim), and the total fault probability is the sum of rates capped at
-1,000,000.
+seeded draw per tool call, with cumulative per-million weights applied in a fixed
+priority order (timeout → drop → corrupt → latency_sim). The total fault probability is
+the sum of configured rates, capped at 1,000,000 per million.
 
 Example:
 
