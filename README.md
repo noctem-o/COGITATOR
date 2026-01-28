@@ -20,6 +20,8 @@ environment.
 - [Artifacts and verification](#artifacts-and-verification)
 - [Commitment boundaries](#commitment-boundaries)
 - [Deterministic Simulation Testing (DST)](#deterministic-simulation-testing-dst)
+- [Verification workflow](#verification-workflow-no-makefile)
+- [Nix (optional)](#nix-optional)
 - [Project layout](#project-layout)
 
 ---
@@ -63,6 +65,12 @@ cargo build --release
   --meta out/meta.json \
   --trace out/trace.jsonl \
   --expect "$(cat out/witness_root.txt)"
+```
+
+PowerShell equivalent:
+
+```powershell
+./target/release/cogitator verify --meta out/meta.json --trace out/trace.jsonl --expect (Get-Content out/witness_root.txt).Trim()
 ```
 
 ## Install prerequisites
@@ -142,6 +150,7 @@ cargo build --release
 ```
 
 Agent-only flags such as `--threads` and `--fault-*` are rejected in non-agent runs.
+In agent mode, `--threads` affects throughput only and is recorded as provenance (not witnessed).
 
 ---
 
@@ -274,6 +283,7 @@ nix develop
 
 Cogitator remains fully functional without Nix; any Nix provenance data is recorded only
 in provenance artifacts and never alters witness roots.
+For deterministic `created_at`, set `SOURCE_DATE_EPOCH` (the dev shell may do this automatically).
 
 ---
 
