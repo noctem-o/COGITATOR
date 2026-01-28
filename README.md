@@ -67,10 +67,10 @@ cargo build --release
   --expect "$(cat out/witness_root.txt)"
 ```
 
-PowerShell equivalent:
+PowerShell equivalent (native Windows builds use `.exe` and backslashes):
 
 ```powershell
-./target/release/cogitator verify --meta out/meta.json --trace out/trace.jsonl --expect (Get-Content out/witness_root.txt).Trim()
+.\target\release\cogitator.exe verify --meta out\meta.json --trace out\trace.jsonl --expect (Get-Content out\witness_root.txt).Trim()
 ```
 
 ## Install prerequisites
@@ -186,6 +186,7 @@ out/
 - `summary.json` – aggregate metrics
 - `analysis.json` – bundled metadata + summary + results
 - `witness_root.txt` – final witness root for the run
+- `run_0000/witness_root.txt` – agent-mode witness root for that run (agent trace + tool calls)
 - `nix_provenance.json` – optional Nix metadata (provenance only)
 
 ---
@@ -270,6 +271,8 @@ Use the release binary to reproduce runs and verify witnesses:
   --clean
 ./target/release/cogitator verify --witness demo_out/drift/baseline_faults
 ```
+If the scenario name changes, verify any directory under `demo_out/drift/*/` that contains
+`witness_manifest.json`.
 
 ---
 
