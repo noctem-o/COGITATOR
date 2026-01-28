@@ -1,27 +1,58 @@
-```text
-   ██████╗  ██████╗  ██████╗ ██╗████████╗ █████╗ ████████╗ ██████╗ ██████╗
-  ██╔════╝ ██╔═══██╗██╔════╝ ██║╚══██╔══╝██╔══██╗╚══██╔══╝██╔═══██╗██╔══██╗
-  ██║      ██║   ██║██║  ███╗██║   ██║   ███████║   ██║   ██║   ██║██████╔╝
-  ██║      ██║   ██║██║   ██║██║   ██║   ██╔══██║   ██║   ██║   ██║██╔══██╗
-  ╚██████╗ ╚██████╔╝╚██████╔╝██║   ██║   ██║  ██║   ██║   ╚██████╔╝██║  ██║
-   ╚═════╝  ╚═════╝  ╚═════╝ ╚═╝   ╚═╝   ╚═╝  ╚═╝   ╚═╝    ╚═════╝ ╚═╝  ╚═╝
+# Cogitator
 
-Cogitator is a deterministic evaluation harness with cryptographic witness roots that
-make agent runs replayable, auditable, and verifiable. It captures full causal traces,
-tracks entropy usage where applicable, and packages run artifacts so that third parties
-can recompute the same witness root from the same inputs and environment.
+Deterministic evaluation harnesses, cryptographic witness roots, and replayable agent runs.
+Cogitator captures full causal traces, records entropy usage (when applicable), and produces
+byte-stable artifacts so third parties can verify the same results from the same inputs and
+environment.
+
+![Rust](https://img.shields.io/badge/Rust-stable-orange?logo=rust&logoColor=white)
+![Deterministic](https://img.shields.io/badge/Deterministic-Yes-4c1)
+![Witnessed](https://img.shields.io/badge/Witnessed-Yes-6a5acd)
 
 ## Table of contents
 
+- [Why Cogitator](#why-cogitator)
+- [Key capabilities](#key-capabilities)
 - [Quickstart](#quickstart)
-- [Requirements](#requirements)
-- [Install prerequisites (by OS)](#install-prerequisites-by-os)
+- [Install prerequisites](#install-prerequisites)
 - [Build and run](#build-and-run)
 - [CLI overview](#cli-overview)
-- [Output artifacts](#output-artifacts)
-- [Feature list](#feature-list)
-- [Commitment boundaries (witness vs provenance)](#commitment-boundaries-witness-vs-provenance)
-- [Deterministic Simulation Testing (DST)-style fault injection](#deterministic-simulation-testing-dst-style-fault-injection)
+- [Artifacts and verification](#artifacts-and-verification)
+- [Commitment boundaries](#commitment-boundaries)
+- [Deterministic Simulation Testing (DST)](#deterministic-simulation-testing-dst)
+- [Project layout](#project-layout)
+
+---
+
+## Why Cogitator
+
+Auditable agent evaluations should be reproducible by anyone, not just the original
+operator. Cogitator makes runs replayable by committing every trace event into a
+cryptographic witness root. This allows third parties to re-run the same inputs and
+validate the exact same witness root, even across different machines.
+
+## Key capabilities
+
+- **Deterministic execution** with explicit entropy accounting and ordered trace emission.
+- **Witness roots (BLAKE3)** that commit to every event in a run’s trace.
+- **Deterministic agent mode** with tool transcript recording + replay for byte-stable
+  re-execution.
+- **LLM-as-tool integration** where inference is just another tool call; live mode records
+  responses and replay reuses them.
+- **Drift detection** that compares replayed tool calls against recorded transcripts and
+  emits machine-readable drift reports.
+- **Witness bundles** that package agent traces, tool transcripts, hash chains, and
+  manifests for offline verification workflows.
+- **Hash-chain auditing** for agent traces and tool calls, separate from the global witness
+  root.
+- **Reproducible run metadata** (seed, run counts, parallel strategy, provenance).
+- **DST-style fault injection** with deterministic chaos testing and witness-committed
+  schedules.
+- **Witness/provenance split** so runtime details stay out of witness commitments while
+  remaining discoverable.
+- **Canonical JSON artifacts** to keep audit outputs byte-stable across runs.
+
+---
 
 ## Quickstart
 
@@ -30,13 +61,7 @@ cargo build
 ./target/debug/cogitator run --seed 42 --runs 10 --out-dir out
 ```
 
-## Requirements
-
-- Rust toolchain (via `rustup`) with Cargo.
-- A C/C++ compiler toolchain for building Rust dependencies.
-- Git (optional but recommended for cloning).
-
-## Install prerequisites (by OS)
+## Install prerequisites
 
 ### Linux (Debian/Ubuntu)
 
@@ -89,6 +114,8 @@ sudo apt-get install -y build-essential curl git
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
+---
+
 ## Build and run
 
 ```bash
@@ -112,17 +139,9 @@ cargo build
 
 Agent-only flags such as `--threads` and `--fault-*` are rejected in non-agent runs.
 
-## Output artifacts
+---
 
-Outputs include:
-
-- `meta.json` – run metadata (witnessed + provenance)
-- `trace.jsonl` – canonical trace events
-- `results.csv` / `results.json` – case-level results
-- `summary.json` – aggregate metrics
-- `analysis.json` – bundled metadata + summary + results
-- `witness_root.txt` – final witness root for the run
-- `nix_provenance.json` – optional Nix metadata (provenance only)
+## Artifacts and verification
 
 A typical output layout looks like:
 
@@ -146,33 +165,21 @@ out/
     └── witness_manifest.json
 ```
 
-## Feature list
+**Artifact highlights**
 
-- **Deterministic execution** with explicit entropy accounting (where applicable) and
-  ordered trace emission.
-- **Witness roots** (BLAKE3) that commit to every event in a run’s trace.
-- **Deterministic agent mode** with tool transcript recording + replay for byte-stable
-  re-execution.
-- **Optional LLM-as-tool integration**: LLM inference is just another tool call. Live
-  mode records responses into the transcript; replay reuses them. The default stub
-  backend is fully offline and requires no model installation.
-- **Drift detection** that compares replayed tool calls against recorded transcripts and
-  emits machine-readable drift reports.
-- **Witness bundles** that package agent traces, tool transcripts, hash chains, and
-  manifests for offline verification workflows.
-- **Hash-chain auditing** for agent traces + tool calls, separate from the global witness
-  root.
-- **Reproducible run metadata** capturing seed, run counts, parallel strategy, and
-  provenance.
-- **Artifact manifests** for programmatic consumption of outputs.
-- **Deterministic Simulation Testing (DST)-style fault injection** for reproducible chaos
-  testing, with fault schedules committed to the witness metadata.
-- **Witness/provenance split** so runtime environment details stay out of witness
-  commitments while remaining discoverable.
-- **Canonical JSON artifacts** to keep audit artifacts byte-stable across runs.
-- **Optional TUI** for inspecting run summaries and drift status (feature-flagged).
+- `meta.json` – run metadata (witnessed + provenance)
+- `trace.jsonl` – canonical trace events
+- `results.csv` / `results.json` – case-level results
+- `summary.json` – aggregate metrics
+- `analysis.json` – bundled metadata + summary + results
+- `witness_root.txt` – final witness root for the run
+- `nix_provenance.json` – optional Nix metadata (provenance only)
 
-## Commitment boundaries (witness vs provenance)
+---
+
+## Commitment boundaries
+
+Cogitator draws a strict line between what is **witnessed** and what is **provenance**:
 
 - **Witness root** commits to canonical trace entries plus agent traces + tool call witness
   views in deterministic order (agent step, then tool calls by `tool_call_idx`). Simulated
@@ -182,13 +189,15 @@ out/
 - **Bundle hash** covers all artifacts listed in the witness manifest (including optional
   provenance artifacts like `nix_provenance.json`) for offline verification.
 
-## Deterministic Simulation Testing (DST)-style fault injection
+---
+
+## Deterministic Simulation Testing (DST)
 
 Cogitator can deterministically inject tool faults (timeouts, corruptions, drops, and
 latency simulations). Faults are driven by a seeded schedule and recorded in tool
 transcripts so that record + replay is byte-stable. Simulated latency is exposed to the
 agent but excluded from witness commitments by default. Fault selection uses a single
-deterministic draw with cumulative per-million weights (first matching bucket wins).
+seeded draw with cumulative per-million weights (first matching bucket wins).
 
 Example:
 
@@ -202,3 +211,21 @@ Example:
   --fault-corrupt-rate 0.001 \
   --fault-drop-rate 0.001
 ```
+
+---
+
+## Project layout
+
+```
+.
+├── src/            # Rust source
+├── tests/          # Test suite
+├── schemas/        # JSON schemas for artifacts
+├── cogitator_paper.tex
+└── README.md
+```
+
+---
+
+If you build on Cogitator, please cite the project and include the witness root in any
+reported results so others can independently verify your run.
