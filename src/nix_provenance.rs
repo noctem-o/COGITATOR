@@ -1,7 +1,9 @@
 use anyhow::{Context, Result};
 use clap::ValueEnum;
+#[cfg(not(target_os = "windows"))]
 use serde_json::Value;
 use std::path::Path;
+#[cfg(not(target_os = "windows"))]
 use std::process::Command;
 
 use crate::model::NixProvenance;
@@ -15,6 +17,20 @@ pub enum NixProvenanceMode {
     Off,
 }
 
+#[cfg(target_os = "windows")]
+pub fn collect_nix_provenance(
+    mode: NixProvenanceMode,
+    _repo_root: &Path,
+) -> Result<Option<NixProvenance>> {
+    match mode {
+        NixProvenanceMode::Off | NixProvenanceMode::Auto => Ok(None),
+        NixProvenanceMode::On => {
+            anyhow::bail!("--nix-provenance=on is not supported on Windows")
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
 pub fn collect_nix_provenance(
     mode: NixProvenanceMode,
     repo_root: &Path,
@@ -57,10 +73,12 @@ pub fn collect_nix_provenance(
     }
 }
 
+#[cfg(not(target_os = "windows"))]
 fn nix_version() -> Option<String> {
     command_output("nix", &["--version"])
 }
 
+#[cfg(not(target_os = "windows"))]
 fn flake_metadata(repo_root: &Path) -> Option<Value> {
     let lock_path = repo_root.join("flake.lock");
     if !lock_path.exists() {
@@ -69,6 +87,7 @@ fn flake_metadata(repo_root: &Path) -> Option<Value> {
     command_json("nix", &["flake", "metadata", "--json"], Some(repo_root))
 }
 
+#[cfg(not(target_os = "windows"))]
 fn current_system_info() -> Option<Value> {
     let path = Path::new("/run/current-system");
     if !path.exists() {
@@ -77,6 +96,7 @@ fn current_system_info() -> Option<Value> {
     command_json("nix", &["path-info", "--json", "/run/current-system"], None)
 }
 
+#[cfg(not(target_os = "windows"))]
 fn command_output(command: &str, args: &[&str]) -> Option<String> {
     let output = Command::new(command).args(args).output().ok()?;
     if !output.status.success() {
@@ -93,6 +113,7 @@ fn command_output(command: &str, args: &[&str]) -> Option<String> {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
 fn command_json(command: &str, args: &[&str], cwd: Option<&Path>) -> Option<Value> {
     let mut cmd = Command::new(command);
     cmd.args(args);
@@ -108,6 +129,7 @@ fn command_json(command: &str, args: &[&str], cwd: Option<&Path>) -> Option<Valu
         .map(canonicalize_json)
 }
 
+#[cfg(not(target_os = "windows"))]
 fn canonicalize_json(value: Value) -> Value {
     match value {
         Value::Object(map) => {

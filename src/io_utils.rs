@@ -32,8 +32,7 @@ where
                 file.sync_all()
                     .with_context(|| format!("failed to sync {}", label))?;
                 drop(file);
-                fs::rename(&tmp_path, path)
-                    .with_context(|| format!("failed to rename {}", label))?;
+                replace_file(&tmp_path, path, label)?;
                 sync_dir(dir)?;
                 return Ok(());
             }
@@ -73,5 +72,23 @@ fn sync_dir(dir: &Path) -> Result<()> {
     dir_file
         .sync_all()
         .with_context(|| "failed to sync output dir")?;
+    Ok(())
+}
+
+fn replace_file(tmp_path: &Path, dest_path: &Path, label: &str) -> Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        if dest_path.exists() {
+            match fs::remove_file(dest_path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(error)
+                        .with_context(|| format!("failed to remove {}", label));
+                }
+            }
+        }
+    }
+    fs::rename(tmp_path, dest_path).with_context(|| format!("failed to rename {}", label))?;
     Ok(())
 }

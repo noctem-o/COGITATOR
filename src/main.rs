@@ -32,7 +32,7 @@ fn rel_artifact_path(out_dir: &Path, path: &Path) -> String {
     path.strip_prefix(out_dir)
         .unwrap_or(path)
         .to_string_lossy()
-        .into_owned()
+        .replace('\\', "/")
 }
 
 /// CLI entrypoint
