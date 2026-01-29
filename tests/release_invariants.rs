@@ -48,6 +48,7 @@ fn verify_witness_bundle_recomputes_hashes() {
             entropy_sources: vec!["rng:StdRng(seed)".to_string()],
             total_rng_calls: 0,
             chaos_profile: None,
+            pass_threshold: None,
         },
         provenance: cogitator::model::ProvenanceMetadata {
             created_at: "2024-01-01T00:00:00Z".to_string(),

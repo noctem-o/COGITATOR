@@ -29,4 +29,14 @@ pub enum DriftIssue {
     UnexpectedToolRequest {
         index: u32,
     },
+    GauntletOutputMismatch {
+        step: u32,
+        tool_call_idx: u32,
+        tool_name: String,
+        json_pointer: String,
+        label: String,
+        issue_kind: String,
+        expected: String,
+        actual: String,
+    },
 }

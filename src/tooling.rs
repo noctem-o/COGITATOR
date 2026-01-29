@@ -99,15 +99,25 @@ impl ToolTranscript {
     }
 
     pub fn execute(&mut self, step: u32, request: ToolRequest) -> ToolResponse {
+        let response = if request.tool_name == llm::LlmRequest::tool_name() {
+            llm_live_response(&request).unwrap_or_else(|| stub_response(&request))
+        } else {
+            stub_response(&request)
+        };
+        self.execute_with_response(step, request, response)
+    }
+
+    pub fn execute_with_response(
+        &mut self,
+        step: u32,
+        request: ToolRequest,
+        response: ToolResponse,
+    ) -> ToolResponse {
         let tool_call_idx = self.next_call_idx;
         self.next_call_idx = self.next_call_idx.saturating_add(1);
         match self.mode {
             ToolMode::Live => {
-                let mut response = if request.tool_name == llm::LlmRequest::tool_name() {
-                    llm_live_response(&request).unwrap_or_else(|| stub_response(&request))
-                } else {
-                    stub_response(&request)
-                };
+                let mut response = response;
                 let fault = if let Some(chaos) = &self.chaos {
                     chaos.decide_fault(step, tool_call_idx, &request.tool_name)
                 } else {

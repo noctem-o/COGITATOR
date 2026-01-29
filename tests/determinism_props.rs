@@ -87,6 +87,7 @@ proptest! {
                     entropy_sources: vec!["rng:StdRng(seed)".to_string()],
                     total_rng_calls: output.total_rng_calls,
                     chaos_profile: None,
+                    pass_threshold: None,
                 };
                 witness_root_for_trace(&metadata, &output.trace)
             })
@@ -139,6 +140,7 @@ proptest! {
                 schedule_version: CHAOS_SCHEDULE_VERSION,
                 rates,
             }),
+            pass_threshold: None,
         };
 
         let mut agent_trace = Vec::new();
@@ -251,6 +253,7 @@ fn witness_root_sorts_tool_calls_by_index() {
         entropy_sources: vec![],
         total_rng_calls: 0,
         chaos_profile: None,
+        pass_threshold: None,
     };
 
     let agent_trace = vec![AgentTraceEntry {
@@ -315,6 +318,7 @@ fn llm_stub_record_replay_deterministic() {
         ],
         total_rng_calls: 0,
         chaos_profile: None,
+        pass_threshold: None,
     };
 
     let agent_trace = llm_agent_trace(seed);
@@ -360,6 +364,7 @@ fn llm_stub_thread_invariance() {
         ],
         total_rng_calls: 0,
         chaos_profile: None,
+        pass_threshold: None,
     };
 
     let roots: Vec<String> = [1usize, 4]
@@ -447,6 +452,7 @@ fn agent_witness_root_invariant_across_thread_counts() {
                         ],
                         total_rng_calls: 0,
                         chaos_profile: None,
+                        pass_threshold: None,
                     };
 
                     let mut agent = cogitator::agent::ClawdbotAgent::new(

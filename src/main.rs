@@ -14,6 +14,7 @@ mod canonical_json;
 mod chaos;
 mod drift;
 mod eval;
+mod gauntlet;
 mod io_utils;
 mod llm;
 mod model;
@@ -203,6 +204,14 @@ pub struct RunArgs {
 
     #[arg(long, requires = "agent_mode", help = "Agent/replay only")]
     pub llm_seed: Option<u64>,
+
+    #[arg(
+        long,
+        requires = "agent_mode",
+        default_value_if("agent_mode", ArgPredicate::IsPresent, "0.5"),
+        help = "Agent/replay only; stored as canonical string in witness metadata"
+    )]
+    pub pass_threshold: Option<String>,
 
     #[arg(
         long,
@@ -623,7 +632,7 @@ fn run_agent(args: RunArgs) -> Result<()> {
         });
         let agent_name = agent_name.unwrap_or_else(|| "clawdbot".to_string());
 
-        if agent_name != "clawdbot" {
+        if agent_name != "clawdbot" && agent_name != "gauntlet" {
             anyhow::bail!("unsupported agent: {}", agent_name);
         }
 
@@ -639,8 +648,24 @@ fn run_agent(args: RunArgs) -> Result<()> {
             let chaos_profile = replay_chaos_profile
                 .clone()
                 .unwrap_or_else(|| resolve_chaos_profile(&args, args.seed));
-            let metadata =
-                build_agent_metadata(&args, 0, chaos_profile.clone(), nix_provenance.clone());
+            let pass_threshold_value = args
+                .pass_threshold
+                .clone()
+                .unwrap_or_else(|| "0.5".to_string());
+            let pass_threshold_f32 =
+                parse_pass_threshold(&pass_threshold_value).context("invalid pass_threshold")?;
+            let pass_threshold_witnessed = if agent_name == "gauntlet" {
+                Some(canonical_threshold_string(pass_threshold_f32))
+            } else {
+                None
+            };
+            let metadata = build_agent_metadata(
+                &args,
+                0,
+                chaos_profile.clone(),
+                nix_provenance.clone(),
+                pass_threshold_witnessed.clone(),
+            );
             let meta_path = run_dir.join("meta.json");
             canonical_json::write_json(&meta_path, &metadata, "meta.json")?;
 
@@ -669,38 +694,63 @@ fn run_agent(args: RunArgs) -> Result<()> {
                 tooling::ToolTranscript::new_live(chaos_engine)
             };
 
-            let llm_config = agent::LlmConfig {
-                enabled: matches!(args.llm_toggle(), LlmToggle::On),
-                model: args.llm_model_value().to_string(),
-                seed: args.llm_seed,
-            };
-            let mut agent = agent::ClawdbotAgent::new(llm_config);
             let mut agent_trace = Vec::new();
-            let mut prior_outputs = Vec::new();
+            let mut gauntlet_issues: Vec<report::DriftIssue> = Vec::new();
 
-            const MAX_STEPS: u32 = 8;
-            for step in 0..MAX_STEPS {
-                let input = agent::AgentInput {
+            if agent_name == "gauntlet" {
+                let suite = gauntlet::TaskSuite::load(Path::new(gauntlet::GAUNTLET_TASKS_PATH))?;
+                let regress = std::env::var("COGITATOR_GAUNTLET_REGRESS")
+                    .map(|value| value == "1" || value == "true")
+                    .unwrap_or(false);
+                let config = gauntlet::GauntletConfig {
+                    seed: args.seed,
                     run_id,
                     case_id: case_id.clone(),
-                    step,
-                    seed: args.seed,
-                    prior_tool_outputs: prior_outputs.clone(),
+                    pass_threshold_f32,
+                    pass_threshold_witnessed: pass_threshold_witnessed
+                        .clone()
+                        .unwrap_or_else(|| "0.5".to_string()),
+                    regress,
                 };
-                let output = agent.step(input);
-                agent_trace.push(agent::trace_entry_from_output(step, &output));
+                let gauntlet_output =
+                    gauntlet::run_gauntlet(&suite, &config, &mut tool_transcript)?;
+                let _ = gauntlet_output.total_rng_calls;
+                agent_trace = gauntlet_output.agent_trace;
+                gauntlet_issues = gauntlet_output.issues;
+            } else {
+                let llm_config = agent::LlmConfig {
+                    enabled: matches!(args.llm_toggle(), LlmToggle::On),
+                    model: args.llm_model_value().to_string(),
+                    seed: args.llm_seed,
+                };
+                let mut agent = agent::ClawdbotAgent::new(llm_config);
+                let mut prior_outputs = Vec::new();
 
-                for request in output.tool_requests {
-                    let response = tool_transcript.execute(step, request);
-                    prior_outputs.push(response);
-                }
+                const MAX_STEPS: u32 = 8;
+                for step in 0..MAX_STEPS {
+                    let input = agent::AgentInput {
+                        run_id,
+                        case_id: case_id.clone(),
+                        step,
+                        seed: args.seed,
+                        prior_tool_outputs: prior_outputs.clone(),
+                    };
+                    let output = agent.step(input);
+                    agent_trace.push(agent::trace_entry_from_output(step, &output));
 
-                if output.is_final {
-                    break;
+                    for request in output.tool_requests {
+                        let response = tool_transcript.execute(step, request);
+                        prior_outputs.push(response);
+                    }
+
+                    if output.is_final {
+                        break;
+                    }
                 }
             }
 
-            let mismatches = tool_transcript.mismatches().to_vec();
+            let mut mismatches = tool_transcript.mismatches().to_vec();
+            mismatches.extend(gauntlet_issues);
             let transcript_record = tool_transcript.into_record();
             let agent_trace_path = run_dir.join("agent_trace.json");
             canonical_json::write_json(&agent_trace_path, &agent_trace, "agent_trace.json")?;
@@ -963,6 +1013,7 @@ fn build_metadata(
             entropy_sources: vec!["rng:StdRng(seed)".to_string()],
             total_rng_calls,
             chaos_profile: None,
+            pass_threshold: None,
         },
         provenance: model::ProvenanceMetadata {
             created_at,
@@ -982,6 +1033,7 @@ fn build_agent_metadata(
     total_rng_calls: u64,
     chaos_profile: chaos::ChaosProfile,
     nix_provenance: Option<model::NixProvenance>,
+    pass_threshold: Option<String>,
 ) -> model::RunMetadata {
     let created_at = resolve_created_at(args);
     let git_rev = git_rev();
@@ -1019,6 +1071,7 @@ fn build_agent_metadata(
                 schedule_version: chaos_profile.schedule_version,
                 rates: chaos_profile.rates.clone(),
             }),
+            pass_threshold,
         },
         provenance: model::ProvenanceMetadata {
             created_at,
@@ -1047,6 +1100,26 @@ fn resolve_created_at(args: &RunArgs) -> String {
     chrono::DateTime::<chrono::Utc>::from_timestamp(secs, 0)
         .map(|dt| dt.to_rfc3339())
         .unwrap_or_default()
+}
+
+fn parse_pass_threshold(value: &str) -> Result<f32> {
+    let parsed: f32 = value.parse().with_context(|| "parse pass threshold")?;
+    Ok(parsed)
+}
+
+fn canonical_threshold_string(value: f32) -> String {
+    let mut text = format!("{:.6}", value);
+    while text.contains('.') && text.ends_with('0') {
+        text.pop();
+    }
+    if text.ends_with('.') {
+        text.pop();
+    }
+    if text.is_empty() {
+        "0".to_string()
+    } else {
+        text
+    }
 }
 
 fn resolve_chaos_profile(args: &RunArgs, seed: u64) -> chaos::ChaosProfile {
@@ -1111,10 +1184,12 @@ fn run_demo_agent(
             llm: Some(LlmToggle::Off),
             llm_model: Some("stub".to_string()),
             llm_seed: None,
+            pass_threshold: Some("0.5".to_string()),
             nix_provenance: nix_provenance::NixProvenanceMode::Off,
         },
         0,
         chaos_profile.clone(),
+        None,
         None,
     );
 
