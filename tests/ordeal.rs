@@ -1,14 +1,14 @@
-use cogitator::gauntlet::{GauntletConfig, TaskSuite, GAUNTLET_TASKS_PATH};
+use cogitator::ordeal::{OrdealConfig, TaskSuite, ORDEAL_TASKS_PATH};
 use cogitator::model::WitnessedMetadata;
 use cogitator::report::DriftIssue;
 use cogitator::tooling::ToolTranscript;
 use cogitator::{drift, trace};
 use rayon::ThreadPoolBuilder;
 
-fn run_gauntlet_root(seed: u64, pass_threshold: &str) -> String {
-    let suite = TaskSuite::load(std::path::Path::new(GAUNTLET_TASKS_PATH)).expect("suite");
+fn run_ordeal_root(seed: u64, pass_threshold: &str) -> String {
+    let suite = TaskSuite::load(std::path::Path::new(ORDEAL_TASKS_PATH)).expect("suite");
     let mut transcript = ToolTranscript::new_live(None);
-    let config = GauntletConfig {
+    let config = OrdealConfig {
         seed,
         run_id: 0,
         case_id: "case".to_string(),
@@ -20,7 +20,7 @@ fn run_gauntlet_root(seed: u64, pass_threshold: &str) -> String {
         regress: false,
     };
     let output =
-        cogitator::gauntlet::run_gauntlet(&suite, &config, &mut transcript).expect("gauntlet run");
+        cogitator::ordeal::run_ordeal(&suite, &config, &mut transcript).expect("ordeal run");
     let record = transcript.into_record();
     let metadata = WitnessedMetadata {
         schema_version: cogitator::model::TRACE_SCHEMA_VERSION,
@@ -46,15 +46,15 @@ fn run_gauntlet_root(seed: u64, pass_threshold: &str) -> String {
 }
 
 #[test]
-fn gauntlet_task_loader_validates_count() {
-    let suite = TaskSuite::load(std::path::Path::new(GAUNTLET_TASKS_PATH)).expect("suite");
+fn ordeal_task_loader_validates_count() {
+    let suite = TaskSuite::load(std::path::Path::new(ORDEAL_TASKS_PATH)).expect("suite");
     assert_eq!(suite.tasks.len(), 50);
     assert_eq!(suite.tasks.first().map(|task| task.task_id), Some(0));
     assert_eq!(suite.tasks.last().map(|task| task.task_id), Some(49));
 }
 
 #[test]
-fn gauntlet_witness_root_thread_invariant() {
+fn ordeal_witness_root_thread_invariant() {
     let roots: Vec<String> = [1usize, 16]
         .iter()
         .map(|threads| {
@@ -62,23 +62,23 @@ fn gauntlet_witness_root_thread_invariant() {
                 .num_threads(*threads)
                 .build()
                 .unwrap()
-                .install(|| run_gauntlet_root(42, "0.5"))
+                .install(|| run_ordeal_root(42, "0.5"))
         })
         .collect();
     assert!(roots.iter().all(|root| root == &roots[0]));
 }
 
 #[test]
-fn gauntlet_witness_root_changes_with_threshold() {
-    let root_a = run_gauntlet_root(42, "0.346");
-    let root_b = run_gauntlet_root(42, "0.5");
+fn ordeal_witness_root_changes_with_threshold() {
+    let root_a = run_ordeal_root(42, "0.346");
+    let root_b = run_ordeal_root(42, "0.5");
     assert_ne!(root_a, root_b);
 }
 
 #[test]
-fn gauntlet_replay_regression_reports_drift() {
-    let suite = TaskSuite::load(std::path::Path::new(GAUNTLET_TASKS_PATH)).expect("suite");
-    let config = GauntletConfig {
+fn ordeal_replay_regression_reports_drift() {
+    let suite = TaskSuite::load(std::path::Path::new(ORDEAL_TASKS_PATH)).expect("suite");
+    let config = OrdealConfig {
         seed: 42,
         run_id: 0,
         case_id: "case".to_string(),
@@ -88,16 +88,16 @@ fn gauntlet_replay_regression_reports_drift() {
     };
     let mut live_transcript = ToolTranscript::new_live(None);
     let _live_output =
-        cogitator::gauntlet::run_gauntlet(&suite, &config, &mut live_transcript).expect("live");
+        cogitator::ordeal::run_ordeal(&suite, &config, &mut live_transcript).expect("live");
     let live_record = live_transcript.into_record();
 
     let mut replay_transcript = ToolTranscript::new_replay(live_record.clone());
-    let config_regressed = GauntletConfig {
+    let config_regressed = OrdealConfig {
         regress: true,
         ..config
     };
     let replay_output =
-        cogitator::gauntlet::run_gauntlet(&suite, &config_regressed, &mut replay_transcript)
+        cogitator::ordeal::run_ordeal(&suite, &config_regressed, &mut replay_transcript)
             .expect("replay");
     let replay_record = replay_transcript.into_record();
 
@@ -106,8 +106,8 @@ fn gauntlet_replay_regression_reports_drift() {
     report.drifted = report.drifted || !report.issues.is_empty();
 
     assert!(report.drifted);
-    let has_gauntlet_issue = report.issues.iter().any(|issue| match issue {
-        DriftIssue::GauntletOutputMismatch {
+    let has_ordeal_issue = report.issues.iter().any(|issue| match issue {
+        DriftIssue::OrdealOutputMismatch {
             step,
             tool_name,
             json_pointer,
@@ -117,7 +117,7 @@ fn gauntlet_replay_regression_reports_drift() {
             ..
         } => {
             *step == 0
-                && tool_name == "gauntlet.lookup"
+                && tool_name == "ordeal.lookup"
                 && json_pointer == "/payload/tags/0"
                 && issue_kind == "missing"
                 && !expected.is_empty()
@@ -125,5 +125,5 @@ fn gauntlet_replay_regression_reports_drift() {
         }
         _ => false,
     });
-    assert!(has_gauntlet_issue);
+    assert!(has_ordeal_issue);
 }

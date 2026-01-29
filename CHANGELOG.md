@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Renamed the gauntlet agent to ordeal; gauntlet remains as a deprecated alias for one release.
+
 ## 0.1.0
 
 - Deterministic trace execution with stable witness roots across runs.

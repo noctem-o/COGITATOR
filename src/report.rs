@@ -29,7 +29,8 @@ pub enum DriftIssue {
     UnexpectedToolRequest {
         index: u32,
     },
-    GauntletOutputMismatch {
+    #[serde(alias = "gauntlet_output_mismatch")]
+    OrdealOutputMismatch {
         step: u32,
         tool_call_idx: u32,
         tool_name: String,

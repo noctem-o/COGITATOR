@@ -14,11 +14,11 @@ mod canonical_json;
 mod chaos;
 mod drift;
 mod eval;
-mod gauntlet;
 mod io_utils;
 mod llm;
 mod model;
 mod nix_provenance;
+mod ordeal;
 mod report;
 mod tooling;
 mod trace;
@@ -141,7 +141,12 @@ pub struct RunArgs {
     #[arg(long)]
     pub created_at: Option<String>,
 
-    #[arg(long, group = "agent_mode")]
+    #[arg(
+        long,
+        group = "agent_mode",
+        value_parser = ["clawdbot", "ordeal", "gauntlet"],
+        help = "Agent name (clawdbot or ordeal; gauntlet is a deprecated alias)"
+    )]
     pub agent: Option<String>,
 
     #[arg(long, group = "agent_mode")]
@@ -209,7 +214,7 @@ pub struct RunArgs {
         long,
         requires = "agent_mode",
         default_value_if("agent_mode", ArgPredicate::IsPresent, "0.5"),
-        help = "Agent/replay only; stored as canonical string in witness metadata"
+        help = "Agent/replay only; stored as canonical string in witness metadata for ordeal runs"
     )]
     pub pass_threshold: Option<String>,
 
@@ -574,6 +579,71 @@ fn demo_drift(args: DemoDriftArgs) -> Result<()> {
     Ok(())
 }
 
+#[derive(Clone, Copy)]
+enum AgentSource {
+    Cli,
+    ReplayManifest,
+    Default,
+}
+
+struct AgentSelection {
+    name: String,
+    legacy_gauntlet: bool,
+    source: AgentSource,
+}
+
+fn normalize_agent_name(raw: &str) -> Result<(String, bool)> {
+    match raw {
+        "clawdbot" => Ok((raw.to_string(), false)),
+        "ordeal" => Ok((raw.to_string(), false)),
+        "gauntlet" => Ok(("ordeal".to_string(), true)),
+        _ => anyhow::bail!("unsupported agent: {}", raw),
+    }
+}
+
+fn select_agent_name(
+    args: &RunArgs,
+    replay_bundle: &Option<(
+        model::WitnessManifest,
+        tooling::ToolTranscriptRecord,
+        Vec<agent::AgentTraceEntry>,
+    )>,
+) -> Result<AgentSelection> {
+    let (raw, source) = if let Some(name) = args.agent.as_ref() {
+        (name.clone(), AgentSource::Cli)
+    } else if let Some((manifest, _, _)) = replay_bundle.as_ref() {
+        (manifest.agent.clone(), AgentSource::ReplayManifest)
+    } else {
+        ("clawdbot".to_string(), AgentSource::Default)
+    };
+
+    let (name, legacy_gauntlet) = normalize_agent_name(&raw)?;
+    Ok(AgentSelection {
+        name,
+        legacy_gauntlet,
+        source,
+    })
+}
+
+fn warn_deprecated_gauntlet(legacy_gauntlet: bool) {
+    if legacy_gauntlet {
+        eprintln!("Warning: agent 'gauntlet' is deprecated; use 'ordeal'.");
+    }
+}
+
+fn parse_bool_env(value: &str) -> bool {
+    value == "1" || value.eq_ignore_ascii_case("true")
+}
+
+fn resolve_ordeal_regress() -> bool {
+    if let Ok(value) = std::env::var("COGITATOR_ORDEAL_REGRESS") {
+        return parse_bool_env(&value);
+    }
+    std::env::var("COGITATOR_GAUNTLET_REGRESS")
+        .map(|value| parse_bool_env(&value))
+        .unwrap_or(false)
+}
+
 fn run_agent(args: RunArgs) -> Result<()> {
     let agent_threads = args.agent_threads();
     if agent_threads == 0 {
@@ -625,16 +695,11 @@ fn run_agent(args: RunArgs) -> Result<()> {
             .and_then(|path| File::open(path).ok())
             .and_then(|file| serde_json::from_reader(file).ok());
 
-        let agent_name = args.agent.clone().or_else(|| {
-            replay_bundle
-                .as_ref()
-                .map(|(manifest, _, _)| manifest.agent.clone())
-        });
-        let agent_name = agent_name.unwrap_or_else(|| "clawdbot".to_string());
-
-        if agent_name != "clawdbot" && agent_name != "gauntlet" {
-            anyhow::bail!("unsupported agent: {}", agent_name);
-        }
+        let agent_selection = select_agent_name(&args, &replay_bundle)?;
+        warn_deprecated_gauntlet(agent_selection.legacy_gauntlet);
+        let agent_name = agent_selection.name.clone();
+        let use_legacy_tasks = agent_selection.legacy_gauntlet
+            && matches!(agent_selection.source, AgentSource::ReplayManifest);
 
         let tui_enabled = !args.no_tui && cfg!(feature = "tui");
 
@@ -654,7 +719,7 @@ fn run_agent(args: RunArgs) -> Result<()> {
                 .unwrap_or_else(|| "0.5".to_string());
             let pass_threshold_f32 =
                 parse_pass_threshold(&pass_threshold_value).context("invalid pass_threshold")?;
-            let pass_threshold_witnessed = if agent_name == "gauntlet" {
+            let pass_threshold_witnessed = if agent_name == "ordeal" {
                 Some(canonical_threshold_string(pass_threshold_f32))
             } else {
                 None
@@ -695,14 +760,17 @@ fn run_agent(args: RunArgs) -> Result<()> {
             };
 
             let mut agent_trace = Vec::new();
-            let mut gauntlet_issues: Vec<report::DriftIssue> = Vec::new();
+            let mut ordeal_issues: Vec<report::DriftIssue> = Vec::new();
 
-            if agent_name == "gauntlet" {
-                let suite = gauntlet::TaskSuite::load(Path::new(gauntlet::GAUNTLET_TASKS_PATH))?;
-                let regress = std::env::var("COGITATOR_GAUNTLET_REGRESS")
-                    .map(|value| value == "1" || value == "true")
-                    .unwrap_or(false);
-                let config = gauntlet::GauntletConfig {
+            if agent_name == "ordeal" {
+                let tasks_path = if use_legacy_tasks {
+                    ordeal::LEGACY_GAUNTLET_TASKS_PATH
+                } else {
+                    ordeal::ORDEAL_TASKS_PATH
+                };
+                let suite = ordeal::TaskSuite::load(Path::new(tasks_path))?;
+                let regress = resolve_ordeal_regress();
+                let config = ordeal::OrdealConfig {
                     seed: args.seed,
                     run_id,
                     case_id: case_id.clone(),
@@ -712,11 +780,10 @@ fn run_agent(args: RunArgs) -> Result<()> {
                         .unwrap_or_else(|| canonical_threshold_string(0.5)),
                     regress,
                 };
-                let gauntlet_output =
-                    gauntlet::run_gauntlet(&suite, &config, &mut tool_transcript)?;
-                let _ = gauntlet_output.total_rng_calls;
-                agent_trace = gauntlet_output.agent_trace;
-                gauntlet_issues = gauntlet_output.issues;
+                let ordeal_output = ordeal::run_ordeal(&suite, &config, &mut tool_transcript)?;
+                let _ = ordeal_output.total_rng_calls;
+                agent_trace = ordeal_output.agent_trace;
+                ordeal_issues = ordeal_output.issues;
             } else {
                 let llm_config = agent::LlmConfig {
                     enabled: matches!(args.llm_toggle(), LlmToggle::On),
@@ -750,7 +817,7 @@ fn run_agent(args: RunArgs) -> Result<()> {
             }
 
             let mut mismatches = tool_transcript.mismatches().to_vec();
-            mismatches.extend(gauntlet_issues);
+            mismatches.extend(ordeal_issues);
             let transcript_record = tool_transcript.into_record();
             let agent_trace_path = run_dir.join("agent_trace.json");
             canonical_json::write_json(&agent_trace_path, &agent_trace, "agent_trace.json")?;
@@ -1325,8 +1392,32 @@ fn command_version(command: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::Cli;
+    use super::{resolve_ordeal_regress, Cli};
     use clap::Parser;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        ENV_LOCK.get_or_init(|| Mutex::new(())).lock().expect("env lock")
+    }
+
+    struct EnvRestore {
+        new_value: Option<String>,
+        legacy_value: Option<String>,
+    }
+
+    impl Drop for EnvRestore {
+        fn drop(&mut self) {
+            match self.new_value.as_ref() {
+                Some(value) => std::env::set_var("COGITATOR_ORDEAL_REGRESS", value),
+                None => std::env::remove_var("COGITATOR_ORDEAL_REGRESS"),
+            }
+            match self.legacy_value.as_ref() {
+                Some(value) => std::env::set_var("COGITATOR_GAUNTLET_REGRESS", value),
+                None => std::env::remove_var("COGITATOR_GAUNTLET_REGRESS"),
+            }
+        }
+    }
 
     #[test]
     fn clap_rejects_agent_only_flags_without_agent_mode() {
@@ -1347,6 +1438,47 @@ mod tests {
     fn clap_accepts_agent_mode_defaults() {
         let result = Cli::try_parse_from(["cogitator", "run", "--agent", "clawdbot"]);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn clap_accepts_ordeal_agent() {
+        let result = Cli::try_parse_from(["cogitator", "run", "--agent", "ordeal"]);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn clap_accepts_gauntlet_agent_alias() {
+        let result = Cli::try_parse_from(["cogitator", "run", "--agent", "gauntlet"]);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn clap_rejects_unknown_agent() {
+        let result = Cli::try_parse_from(["cogitator", "run", "--agent", "foo"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn legacy_gauntlet_regress_env_alias() {
+        let _guard = env_lock();
+        let _restore = EnvRestore {
+            new_value: std::env::var("COGITATOR_ORDEAL_REGRESS").ok(),
+            legacy_value: std::env::var("COGITATOR_GAUNTLET_REGRESS").ok(),
+        };
+
+        std::env::remove_var("COGITATOR_ORDEAL_REGRESS");
+        std::env::remove_var("COGITATOR_GAUNTLET_REGRESS");
+        assert!(!resolve_ordeal_regress());
+
+        std::env::set_var("COGITATOR_GAUNTLET_REGRESS", "1");
+        assert!(resolve_ordeal_regress());
+
+        std::env::set_var("COGITATOR_ORDEAL_REGRESS", "0");
+        assert!(!resolve_ordeal_regress());
+
+        std::env::set_var("COGITATOR_ORDEAL_REGRESS", "true");
+        std::env::set_var("COGITATOR_GAUNTLET_REGRESS", "0");
+        assert!(resolve_ordeal_regress());
     }
 }
 

@@ -29,7 +29,7 @@ environment.
 - [Commitment boundaries](#commitment-boundaries)
 - [Deterministic Simulation Testing (DST)](#deterministic-simulation-testing-dst)
 - [Verification workflow](#verification-workflow-no-makefile)
-- [Gauntlet witness gate in CI](#gauntlet-witness-gate-in-ci)
+- [Ordeal witness gate in CI](#ordeal-witness-gate-in-ci)
 - [Nix (optional)](#nix-optional)
 - [Project layout](#project-layout)
 
@@ -178,6 +178,8 @@ In agent mode, `--threads` affects throughput only and is recorded as provenance
 Agent mode defaults to stubbed LLM tool calls; enable live tool calls with
 `--llm on --llm-model <model>` (and optionally `--llm-seed`).
 
+For the deterministic task-suite agent, use `--agent ordeal` (legacy alias: `gauntlet`).
+
 ---
 
 ## Artifacts and verification
@@ -302,18 +304,20 @@ If the scenario name changes, verify any directory under `demo_out/drift/*/` tha
 
 ---
 
-## Gauntlet witness gate in CI
+## Ordeal witness gate in CI
 
-Cogitator includes a minimal "gauntlet" agent case designed as a single pinned CI gate.
+Cogitator includes a minimal "ordeal" agent case designed as a single pinned CI gate.
 It keeps CI costs low while still asserting a stable end-to-end witness root. To run the
 same check locally, use:
 
 ```bash
-scripts/check_gauntlet_root.sh
+scripts/check_ordeal_root.sh
 ```
 
 The script compares the generated witness root with the golden value in
-`goldens/gauntlet_witness_root.txt` and prints drift diagnostics on mismatch.
+`goldens/ordeal_witness_root.txt` and prints drift diagnostics on mismatch.
+
+Migration note: gauntlet is deprecated; use ordeal.
 
 ---
 
