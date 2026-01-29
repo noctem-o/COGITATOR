@@ -82,6 +82,7 @@ pub struct WitnessedMetadata {
     pub entropy_sources: Vec<String>,
     pub total_rng_calls: u64,
     pub chaos_profile: Option<ChaosProfileSummary>,
+    pub pass_threshold: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
