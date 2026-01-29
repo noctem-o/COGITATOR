@@ -279,9 +279,13 @@ pub fn launch_agent(
 
             let mut tool_lines = Vec::new();
             for call in &tool_transcript.entries {
+                let status = match &call.outcome {
+                    crate::tooling::ToolOutcome::Ok { .. } => "ok",
+                    crate::tooling::ToolOutcome::Err { .. } => "err",
+                };
                 tool_lines.push(Line::from(format!(
                     "step {}: {} → {}",
-                    call.step, call.request.tool_name, call.response.success
+                    call.step, call.tool_name, status
                 )));
             }
             if tool_lines.is_empty() {

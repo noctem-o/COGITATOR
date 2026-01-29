@@ -6,7 +6,7 @@ use cogitator::model::{
     RunMetadata, WitnessManifest, WitnessedMetadata, TRACE_SCHEMA_VERSION,
     WITNESS_MANIFEST_SCHEMA_VERSION,
 };
-use cogitator::tooling::{ToolCall, ToolMode, ToolRequest, ToolResponse, ToolTranscriptRecord};
+use cogitator::tooling::{ToolCall, ToolMode, ToolOutcome, ToolRequest, ToolTranscriptRecord};
 use cogitator::trace;
 use tempfile::tempdir;
 
@@ -77,14 +77,10 @@ fn verify_witness_bundle_recomputes_hashes() {
     let tool_call = ToolCall {
         step: 0,
         tool_call_idx: 0,
-        request: ToolRequest {
-            tool_name: "clawdbot.lookup".to_string(),
-            arguments: serde_json::json!({"case": "alpha"}),
-        },
-        response: ToolResponse {
-            tool_name: "clawdbot.lookup".to_string(),
+        tool_name: "clawdbot.lookup".to_string(),
+        request: serde_json::json!({"case": "alpha"}),
+        outcome: ToolOutcome::Ok {
             output: serde_json::json!({"ok": true}),
-            success: true,
             simulated_latency_ms: None,
         },
         fault: None,

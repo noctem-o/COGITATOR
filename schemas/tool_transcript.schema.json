@@ -12,44 +12,90 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["step", "tool_call_idx", "request", "response"],
+        "required": ["step", "tool_call_idx", "tool_name", "request", "outcome"],
         "properties": {
           "step": { "type": "integer", "minimum": 0 },
           "tool_call_idx": { "type": "integer", "minimum": 0 },
-          "request": { "type": "object" },
-          "response": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["tool_name", "output", "success"],
-            "properties": {
-              "tool_name": { "type": "string" },
-              "output": {},
-              "success": { "type": "boolean" },
-              "simulated_latency_ms": { "type": ["integer", "null"], "minimum": 0 }
-            }
+          "tool_name": { "type": "string" },
+          "request": {},
+          "outcome": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "output"],
+                "properties": {
+                  "kind": { "const": "ok" },
+                  "output": {},
+                  "simulated_latency_ms": { "type": ["integer", "null"], "minimum": 0 }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "error"],
+                "properties": {
+                  "kind": { "const": "err" },
+                  "error": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["error_kind"],
+                    "properties": {
+                      "error_kind": {
+                        "type": "string",
+                        "enum": ["timeout", "drop", "corrupt", "tool_error"]
+                      },
+                      "message": { "type": ["string", "null"] }
+                    }
+                  },
+                  "simulated_latency_ms": { "type": ["integer", "null"], "minimum": 0 }
+                }
+              }
+            ]
           },
           "fault": {
             "type": ["object", "null"],
-            "additionalProperties": false,
-            "required": ["kind", "step", "tool_call_idx", "domain", "params"],
-            "properties": {
-              "kind": {
-                "type": "string",
-                "enum": ["timeout", "corrupt", "drop", "latency_sim"]
-              },
-              "step": { "type": "integer", "minimum": 0 },
-              "tool_call_idx": { "type": "integer", "minimum": 0 },
-              "domain": { "type": "string" },
-              "params": {
+            "oneOf": [
+              {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["mask", "latency_ms"],
+                "required": ["kind", "domain"],
                 "properties": {
-                  "mask": { "type": ["integer", "null"] },
-                  "latency_ms": { "type": ["integer", "null"], "minimum": 0 }
+                  "kind": { "const": "timeout" },
+                  "domain": { "type": "string" },
+                  "timeout_ms": { "type": ["integer", "null"], "minimum": 0 }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "domain"],
+                "properties": {
+                  "kind": { "const": "drop" },
+                  "domain": { "type": "string" }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "domain", "mask"],
+                "properties": {
+                  "kind": { "const": "corrupt" },
+                  "domain": { "type": "string" },
+                  "mask": { "type": "integer" }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "domain", "latency_ms"],
+                "properties": {
+                  "kind": { "const": "latency_sim" },
+                  "domain": { "type": "string" },
+                  "latency_ms": { "type": "integer", "minimum": 0 }
                 }
               }
-            }
+            ]
           }
         }
       }
