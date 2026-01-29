@@ -81,6 +81,7 @@ pub struct WitnessedMetadata {
     pub case_filter: Option<u32>,
     pub entropy_sources: Vec<String>,
     pub total_rng_calls: u64,
+    pub pass_threshold: f32,
     pub chaos_profile: Option<ChaosProfileSummary>,
 }
 

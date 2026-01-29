@@ -74,7 +74,7 @@ proptest! {
                     .num_threads(*threads)
                     .build()
                     .unwrap()
-                    .install(|| eval::run_with_trace(seed, &run_ids, true));
+                    .install(|| eval::run_with_trace(seed, &run_ids, true, 0.5));
 
                 let metadata = WitnessedMetadata {
                     schema_version: TRACE_SCHEMA_VERSION,
@@ -86,6 +86,7 @@ proptest! {
                     case_filter: None,
                     entropy_sources: vec!["rng:StdRng(seed)".to_string()],
                     total_rng_calls: output.total_rng_calls,
+                    pass_threshold: 0.5,
                     chaos_profile: None,
                 };
                 witness_root_for_trace(&metadata, &output.trace)
@@ -133,6 +134,7 @@ proptest! {
                 "chaos:fault-schedule".to_string(),
             ],
             total_rng_calls: 0,
+            pass_threshold: 0.5,
             chaos_profile: Some(ChaosProfileSummary {
                 enabled: true,
                 profile: "custom".to_string(),
@@ -250,6 +252,7 @@ fn witness_root_sorts_tool_calls_by_index() {
         case_filter: None,
         entropy_sources: vec![],
         total_rng_calls: 0,
+        pass_threshold: 0.5,
         chaos_profile: None,
     };
 
@@ -314,6 +317,7 @@ fn llm_stub_record_replay_deterministic() {
             "tooling:stubbed-or-replay".to_string(),
         ],
         total_rng_calls: 0,
+        pass_threshold: 0.5,
         chaos_profile: None,
     };
 
@@ -359,6 +363,7 @@ fn llm_stub_thread_invariance() {
             "tooling:stubbed-or-replay".to_string(),
         ],
         total_rng_calls: 0,
+        pass_threshold: 0.5,
         chaos_profile: None,
     };
 
@@ -446,6 +451,7 @@ fn agent_witness_root_invariant_across_thread_counts() {
                             "chaos:fault-schedule".to_string(),
                         ],
                         total_rng_calls: 0,
+                        pass_threshold: 0.5,
                         chaos_profile: None,
                     };
 

@@ -137,6 +137,9 @@ pub struct RunArgs {
     )]
     pub parallel: bool,
 
+    #[arg(long, default_value_t = 0.5, value_parser = clap::value_parser!(f32))]
+    pub pass_threshold: f32,
+
     #[arg(long)]
     pub created_at: Option<String>,
 
@@ -271,7 +274,7 @@ fn run(args: RunArgs) -> Result<()> {
         None => (0..args.runs).collect(),
     };
 
-    let output = eval::run_with_trace(args.seed, &run_ids, args.parallel);
+    let output = eval::run_with_trace(args.seed, &run_ids, args.parallel, args.pass_threshold);
     let (summary, pass_count, fail_count) = eval::summarize_with_counts(&output.results);
 
     if args.clean && args.out_dir.exists() {
@@ -962,6 +965,7 @@ fn build_metadata(
             case_filter: args.case,
             entropy_sources: vec!["rng:StdRng(seed)".to_string()],
             total_rng_calls,
+            pass_threshold: args.pass_threshold,
             chaos_profile: None,
         },
         provenance: model::ProvenanceMetadata {
@@ -1013,6 +1017,7 @@ fn build_agent_metadata(
                 "chaos:fault-schedule".to_string(),
             ],
             total_rng_calls,
+            pass_threshold: args.pass_threshold,
             chaos_profile: Some(model::ChaosProfileSummary {
                 enabled: chaos_profile.enabled,
                 profile: chaos_profile.profile.clone(),
@@ -1098,6 +1103,7 @@ fn run_demo_agent(
             clean: false,
             no_tui: true,
             parallel: false,
+            pass_threshold: 0.5,
             created_at: None,
             agent: Some("clawdbot".to_string()),
             replay: None,

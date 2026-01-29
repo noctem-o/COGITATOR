@@ -47,6 +47,7 @@ fn verify_witness_bundle_recomputes_hashes() {
             case_filter: Some(0),
             entropy_sources: vec!["rng:StdRng(seed)".to_string()],
             total_rng_calls: 0,
+            pass_threshold: 0.5,
             chaos_profile: None,
         },
         provenance: cogitator::model::ProvenanceMetadata {

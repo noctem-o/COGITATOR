@@ -21,32 +21,32 @@ struct CaseRun {
 
 /// Sequential evaluation (deterministic)
 #[allow(dead_code)]
-pub fn run_sequential(seed: u64, run_ids: &[u32]) -> Vec<CaseResult> {
+pub fn run_sequential(seed: u64, run_ids: &[u32], pass_threshold: f32) -> Vec<CaseResult> {
     run_ids
         .iter()
-        .map(|&id| evaluate_case(seed, id).result)
+        .map(|&id| evaluate_case(seed, id, pass_threshold).result)
         .collect()
 }
 
 /// Parallel evaluation (deterministic ordering by run_id)
 #[allow(dead_code)]
-pub fn run_parallel(seed: u64, run_ids: &[u32]) -> Vec<CaseResult> {
-    run_with_trace(seed, run_ids, true).results
+pub fn run_parallel(seed: u64, run_ids: &[u32], pass_threshold: f32) -> Vec<CaseResult> {
+    run_with_trace(seed, run_ids, true, pass_threshold).results
 }
 
 /// Run evaluation with a canonical trace and entropy accounting.
-pub fn run_with_trace(seed: u64, run_ids: &[u32], parallel: bool) -> RunOutput {
+pub fn run_with_trace(seed: u64, run_ids: &[u32], parallel: bool, pass_threshold: f32) -> RunOutput {
     let n = run_ids.len();
     let mut runs: Vec<Option<CaseRun>> = (0..n).map(|_| None).collect();
 
     if parallel {
         runs.par_iter_mut().enumerate().for_each(|(i, slot)| {
             let run_id = run_ids[i];
-            *slot = Some(evaluate_case(seed, run_id));
+            *slot = Some(evaluate_case(seed, run_id, pass_threshold));
         });
     } else {
         for (i, run_id) in run_ids.iter().copied().enumerate() {
-            runs[i] = Some(evaluate_case(seed, run_id));
+            runs[i] = Some(evaluate_case(seed, run_id, pass_threshold));
         }
     }
 
@@ -71,7 +71,7 @@ pub fn run_with_trace(seed: u64, run_ids: &[u32], parallel: bool) -> RunOutput {
 }
 
 /// Evaluate one deterministic case
-fn evaluate_case(seed: u64, run_id: u32) -> CaseRun {
+fn evaluate_case(seed: u64, run_id: u32, pass_threshold: f32) -> CaseRun {
     let digest = hash_seed(seed, run_id);
     let case_id = to_hex(&digest);
 
@@ -83,7 +83,7 @@ fn evaluate_case(seed: u64, run_id: u32) -> CaseRun {
     let rng_calls = 1;
 
     let score = (base * (1.0 - difficulty)).clamp(0.0, 1.0);
-    let passed = score >= 0.5;
+    let passed = score >= pass_threshold;
 
     let thoughts = vec![
         ThoughtEvent {
