@@ -79,6 +79,7 @@ pub struct WitnessedMetadata {
     pub parallel: bool,
     pub parallel_strategy: String,
     pub case_filter: Option<u32>,
+    pub pass_threshold: String,
     pub entropy_sources: Vec<String>,
     pub total_rng_calls: u64,
     pub chaos_profile: Option<ChaosProfileSummary>,

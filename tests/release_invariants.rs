@@ -45,6 +45,7 @@ fn verify_witness_bundle_recomputes_hashes() {
             parallel: false,
             parallel_strategy: "sequential".to_string(),
             case_filter: Some(0),
+            pass_threshold: "0.5".to_string(),
             entropy_sources: vec!["rng:StdRng(seed)".to_string()],
             total_rng_calls: 0,
             chaos_profile: None,

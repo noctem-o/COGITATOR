@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use clap::builder::ArgPredicate;
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use sha2::{Digest, Sha256};
@@ -101,6 +101,33 @@ pub struct DemoDriftArgs {
     pub clean: bool,
 }
 
+#[derive(Clone, Debug)]
+pub struct PassThresholdArg {
+    pub value: f32,
+    pub canonical: String,
+}
+
+impl PassThresholdArg {
+    pub fn from_value(value: f32) -> Result<Self> {
+        if !(0.0..=1.0).contains(&value) || !value.is_finite() {
+            bail!("pass threshold must be in [0.0, 1.0]");
+        }
+        Ok(Self {
+            value,
+            canonical: format_pass_threshold(value),
+        })
+    }
+}
+
+impl std::str::FromStr for PassThresholdArg {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        let (value, canonical) = parse_pass_threshold(s)?;
+        Ok(Self { value, canonical })
+    }
+}
+
 /// Run a deterministic evaluation and emit artifacts.
 #[derive(Args, Debug)]
 #[command(
@@ -119,6 +146,9 @@ pub struct RunArgs {
 
     #[arg(long)]
     pub case: Option<u32>,
+
+    #[arg(long, default_value = "0.5")]
+    pub pass_threshold: PassThresholdArg,
 
     #[arg(long, default_value = "out")]
     pub out_dir: PathBuf,
@@ -235,6 +265,44 @@ impl RunArgs {
     }
 }
 
+fn parse_pass_threshold(input: &str) -> Result<(f32, String)> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        bail!("pass threshold must not be empty");
+    }
+    if trimmed.contains('e') || trimmed.contains('E') {
+        bail!("pass threshold must be a decimal value");
+    }
+    let parsed: f64 = trimmed
+        .parse()
+        .map_err(|_| anyhow::anyhow!("pass threshold must be a decimal value"))?;
+    if !parsed.is_finite() {
+        bail!("pass threshold must be finite");
+    }
+    if !(0.0..=1.0).contains(&parsed) {
+        bail!("pass threshold must be in [0.0, 1.0]");
+    }
+    let value = parsed as f32;
+    if !(0.0..=1.0).contains(&value) || !value.is_finite() {
+        bail!("pass threshold must be in [0.0, 1.0]");
+    }
+    let canonical = format_pass_threshold(value);
+    Ok((value, canonical))
+}
+
+fn format_pass_threshold(value: f32) -> String {
+    let mut formatted = format!("{:.6}", value);
+    if formatted.contains('.') {
+        while formatted.ends_with('0') {
+            formatted.pop();
+        }
+        if formatted.ends_with('.') {
+            formatted.pop();
+        }
+    }
+    formatted
+}
+
 /// Verify a trace against an expected witness root.
 #[derive(Args, Debug)]
 pub struct VerifyArgs {
@@ -271,7 +339,12 @@ fn run(args: RunArgs) -> Result<()> {
         None => (0..args.runs).collect(),
     };
 
-    let output = eval::run_with_trace(args.seed, &run_ids, args.parallel);
+    let output = eval::run_with_trace(
+        args.seed,
+        &run_ids,
+        args.parallel,
+        args.pass_threshold.value,
+    );
     let (summary, pass_count, fail_count) = eval::summarize_with_counts(&output.results);
 
     if args.clean && args.out_dir.exists() {
@@ -960,6 +1033,7 @@ fn build_metadata(
             parallel: args.parallel,
             parallel_strategy: parallel_strategy(args.parallel),
             case_filter: args.case,
+            pass_threshold: args.pass_threshold.canonical.clone(),
             entropy_sources: vec!["rng:StdRng(seed)".to_string()],
             total_rng_calls,
             chaos_profile: None,
@@ -1007,6 +1081,7 @@ fn build_agent_metadata(
             parallel: false,
             parallel_strategy: "sequential".to_string(),
             case_filter: args.case,
+            pass_threshold: args.pass_threshold.canonical.clone(),
             entropy_sources: vec![
                 "rng:StdRng(seed)".to_string(),
                 "tooling:stubbed-or-replay".to_string(),
@@ -1094,6 +1169,7 @@ fn run_demo_agent(
             seed,
             runs: 1,
             case: Some(run_id),
+            pass_threshold: PassThresholdArg::from_value(0.5)?,
             out_dir: PathBuf::new(),
             clean: false,
             no_tui: true,
@@ -1256,7 +1332,7 @@ fn command_version(command: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::Cli;
+    use super::*;
     use clap::Parser;
 
     #[test]
@@ -1278,6 +1354,42 @@ mod tests {
     fn clap_accepts_agent_mode_defaults() {
         let result = Cli::try_parse_from(["cogitator", "run", "--agent", "clawdbot"]);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn pass_threshold_cli_rejects_invalid_values() {
+        for value in ["-0.1", "1.1", "NaN", "inf"] {
+            let parsed = Cli::try_parse_from(["cogitator", "run", "--pass-threshold", value]);
+            assert!(parsed.is_err(), "expected error for {}", value);
+        }
+    }
+
+    #[test]
+    fn pass_threshold_cli_accepts_valid_values() {
+        let cases = [
+            ("0", 0.0, "0"),
+            ("1", 1.0, "1"),
+            ("0.5", 0.5, "0.5"),
+            ("0.346", 0.346, "0.346"),
+        ];
+
+        for (input, expected_value, expected_canonical) in cases {
+            let parsed = Cli::try_parse_from(["cogitator", "run", "--pass-threshold", input])
+                .expect("parse cli");
+            let CommandLine::Run(args) = parsed.command else {
+                panic!("expected run args");
+            };
+            assert!((args.pass_threshold.value - expected_value).abs() < f32::EPSILON);
+            assert_eq!(args.pass_threshold.canonical, expected_canonical);
+        }
+    }
+
+    #[test]
+    fn pass_threshold_canonicalizes_without_scientific_notation() {
+        let (_, canonical) = parse_pass_threshold("0.5000").expect("parse threshold");
+        assert_eq!(canonical, "0.5");
+        assert!(!canonical.contains('e'));
+        assert!(!canonical.contains('E'));
     }
 }
 

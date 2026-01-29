@@ -74,7 +74,7 @@ proptest! {
                     .num_threads(*threads)
                     .build()
                     .unwrap()
-                    .install(|| eval::run_with_trace(seed, &run_ids, true));
+                    .install(|| eval::run_with_trace(seed, &run_ids, true, 0.5));
 
                 let metadata = WitnessedMetadata {
                     schema_version: TRACE_SCHEMA_VERSION,
@@ -84,6 +84,7 @@ proptest! {
                     parallel: true,
                     parallel_strategy: "rayon/ordered-run-ids".to_string(),
                     case_filter: None,
+                    pass_threshold: "0.5".to_string(),
                     entropy_sources: vec!["rng:StdRng(seed)".to_string()],
                     total_rng_calls: output.total_rng_calls,
                     chaos_profile: None,
@@ -127,6 +128,7 @@ proptest! {
             parallel: false,
             parallel_strategy: "sequential".to_string(),
             case_filter: Some(0),
+            pass_threshold: "0.5".to_string(),
             entropy_sources: vec![
                 "rng:StdRng(seed)".to_string(),
                 "tooling:stubbed-or-replay".to_string(),
@@ -239,6 +241,48 @@ proptest! {
 }
 
 #[test]
+fn witness_root_changes_with_pass_threshold() {
+    let seed = 11u64;
+    let run_ids: Vec<u32> = (0..3).collect();
+
+    let output_lo = eval::run_with_trace(seed, &run_ids, false, 0.346);
+    let output_hi = eval::run_with_trace(seed, &run_ids, false, 0.5);
+
+    let metadata_lo = WitnessedMetadata {
+        schema_version: TRACE_SCHEMA_VERSION,
+        seed,
+        requested_runs: run_ids.len() as u32,
+        executed_runs: run_ids.len() as u32,
+        parallel: false,
+        parallel_strategy: "sequential".to_string(),
+        case_filter: None,
+        pass_threshold: "0.346".to_string(),
+        entropy_sources: vec!["rng:StdRng(seed)".to_string()],
+        total_rng_calls: output_lo.total_rng_calls,
+        chaos_profile: None,
+    };
+
+    let metadata_hi = WitnessedMetadata {
+        schema_version: TRACE_SCHEMA_VERSION,
+        seed,
+        requested_runs: run_ids.len() as u32,
+        executed_runs: run_ids.len() as u32,
+        parallel: false,
+        parallel_strategy: "sequential".to_string(),
+        case_filter: None,
+        pass_threshold: "0.5".to_string(),
+        entropy_sources: vec!["rng:StdRng(seed)".to_string()],
+        total_rng_calls: output_hi.total_rng_calls,
+        chaos_profile: None,
+    };
+
+    let root_lo = witness_root_for_trace(&metadata_lo, &output_lo.trace);
+    let root_hi = witness_root_for_trace(&metadata_hi, &output_hi.trace);
+
+    assert_ne!(root_lo, root_hi);
+}
+
+#[test]
 fn witness_root_sorts_tool_calls_by_index() {
     let metadata = WitnessedMetadata {
         schema_version: TRACE_SCHEMA_VERSION,
@@ -248,6 +292,7 @@ fn witness_root_sorts_tool_calls_by_index() {
         parallel: false,
         parallel_strategy: "sequential".to_string(),
         case_filter: None,
+        pass_threshold: "0.5".to_string(),
         entropy_sources: vec![],
         total_rng_calls: 0,
         chaos_profile: None,
@@ -309,6 +354,7 @@ fn llm_stub_record_replay_deterministic() {
         parallel: false,
         parallel_strategy: "sequential".to_string(),
         case_filter: Some(0),
+        pass_threshold: "0.5".to_string(),
         entropy_sources: vec![
             "rng:StdRng(seed)".to_string(),
             "tooling:stubbed-or-replay".to_string(),
@@ -354,6 +400,7 @@ fn llm_stub_thread_invariance() {
         parallel: false,
         parallel_strategy: "sequential".to_string(),
         case_filter: Some(0),
+        pass_threshold: "0.5".to_string(),
         entropy_sources: vec![
             "rng:StdRng(seed)".to_string(),
             "tooling:stubbed-or-replay".to_string(),
@@ -440,6 +487,7 @@ fn agent_witness_root_invariant_across_thread_counts() {
                         parallel: false,
                         parallel_strategy: "sequential".to_string(),
                         case_filter: None,
+                        pass_threshold: "0.5".to_string(),
                         entropy_sources: vec![
                             "rng:StdRng(seed)".to_string(),
                             "tooling:stubbed-or-replay".to_string(),
