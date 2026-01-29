@@ -238,6 +238,9 @@ impl RunArgs {
 /// Verify a trace against an expected witness root.
 #[derive(Args, Debug)]
 pub struct VerifyArgs {
+    #[arg(long, help = "Directory containing meta.json, trace.jsonl, and witness_root.txt")]
+    pub dir: Option<PathBuf>,
+
     #[arg(long, default_value = "meta.json")]
     pub meta: PathBuf,
 
@@ -447,6 +450,7 @@ fn demo_drift(args: DemoDriftArgs) -> Result<()> {
                     schema_version: drift::DRIFT_SCHEMA_VERSION,
                     drifted: false,
                     issues: Vec::new(),
+                    first_mismatch: None,
                 }
             };
 
@@ -470,6 +474,15 @@ fn demo_drift(args: DemoDriftArgs) -> Result<()> {
             let tool_transcript_path = scenario_dir.join("tool_transcript.json");
             tooling::write_transcript(&tool_transcript_path, &demo_run.transcript)?;
 
+            let trace_events = build_demo_trace_events(
+                &demo_run.case_id,
+                demo_run.run_id,
+                &demo_run.agent_trace,
+                &demo_run.transcript,
+            )?;
+            let trace_path = scenario_dir.join("trace.jsonl");
+            write_trace(&trace_path, &trace_events)?;
+
             let hash_chain =
                 drift::build_hash_chain(&demo_run.agent_trace, &demo_run.transcript.entries)?;
             let hash_chain_path = scenario_dir.join("hash_chain.txt");
@@ -479,16 +492,23 @@ fn demo_drift(args: DemoDriftArgs) -> Result<()> {
                 &(hash_chain.join("\n") + "\n"),
             )?;
 
-            let witness_root = compute_agent_witness_root(
-                &demo_run.metadata.witnessed,
-                &demo_run.agent_trace,
-                &demo_run.transcript.entries,
-            )?;
+            let witness_root = compute_witness_root(&demo_run.metadata.witnessed, &trace_events)?;
             let witness_root_path = scenario_dir.join("witness_root.txt");
             io_utils::write_atomic_string(
                 &witness_root_path,
                 "witness_root.txt",
                 &format!("{}\n", witness_root),
+            )?;
+            let agent_witness_root = compute_agent_witness_root(
+                &demo_run.metadata.witnessed,
+                &demo_run.agent_trace,
+                &demo_run.transcript.entries,
+            )?;
+            let agent_witness_root_path = scenario_dir.join("agent_witness_root.txt");
+            io_utils::write_atomic_string(
+                &agent_witness_root_path,
+                "agent_witness_root.txt",
+                &format!("{}\n", agent_witness_root),
             )?;
 
             let drift_report_path = scenario_dir.join("drift_report.json");
@@ -498,10 +518,12 @@ fn demo_drift(args: DemoDriftArgs) -> Result<()> {
                 &meta_path,
                 &agent_trace_path,
                 &tool_transcript_path,
+                &trace_path,
                 &drift_report_path,
                 &hash_chain_path,
                 &chaos_profile_path,
                 &witness_root_path,
+                &agent_witness_root_path,
             ])?;
             let bundle_hash = drift::bundle_hash(&artifact_hashes)?;
 
@@ -520,7 +542,7 @@ fn demo_drift(args: DemoDriftArgs) -> Result<()> {
                 drift_report_json: drift_report_path.display().to_string(),
                 hash_chain_txt: hash_chain_path.display().to_string(),
                 chaos_profile_json: Some(chaos_profile_path.display().to_string()),
-                witness_root_txt: Some(witness_root_path.display().to_string()),
+                witness_root_txt: Some(agent_witness_root_path.display().to_string()),
                 nix_provenance_json: None,
                 artifact_hashes,
                 bundle_hash,
@@ -739,6 +761,7 @@ fn run_agent(args: RunArgs) -> Result<()> {
                     schema_version: drift::DRIFT_SCHEMA_VERSION,
                     drifted: !mismatches.is_empty(),
                     issues: mismatches,
+                    first_mismatch: None,
                 }
             };
 
@@ -853,7 +876,23 @@ fn run_agent(args: RunArgs) -> Result<()> {
 }
 
 fn verify_cmd(args: VerifyArgs) -> Result<()> {
-    if let Some(ref witness) = args.witness {
+    let mut meta_path = args.meta;
+    let mut trace_path = args.trace;
+    let mut expect = args.expect;
+    let mut witness = args.witness;
+
+    if let Some(dir) = args.dir {
+        meta_path = dir.join("meta.json");
+        trace_path = dir.join("trace.jsonl");
+        if expect.is_none() && witness.is_none() {
+            let witness_root_path = dir.join("witness_root.txt");
+            if witness_root_path.exists() {
+                witness = Some(witness_root_path);
+            }
+        }
+    }
+
+    if let Some(ref witness) = witness {
         if witness.is_dir() {
             let report = drift::verify_witness_bundle(witness)?;
             println!(
@@ -874,13 +913,13 @@ fn verify_cmd(args: VerifyArgs) -> Result<()> {
         }
     }
 
-    let expect = match (args.expect, args.witness) {
+    let expect = match (expect, witness) {
         (Some(expect), _) => expect,
         (None, Some(path)) => read_trimmed(&path)?,
         (None, None) => anyhow::bail!("--expect or --witness is required"),
     };
 
-    let computed = verify::verify(&args.meta, &args.trace, &expect)?;
+    let computed = verify::verify(&meta_path, &trace_path, &expect)?;
     println!("Verified witness_root={}", computed);
     Ok(())
 }
@@ -1076,6 +1115,8 @@ fn demo_chaos_profile(seed: u64, profile: FaultProfile, enabled: bool) -> chaos:
 }
 
 struct DemoRun {
+    run_id: u32,
+    case_id: String,
     metadata: model::RunMetadata,
     chaos_profile: chaos::ChaosProfile,
     agent_trace: Vec<agent::AgentTraceEntry>,
@@ -1156,11 +1197,73 @@ fn run_demo_agent(
     }
 
     Ok(DemoRun {
+        run_id,
+        case_id,
         metadata,
         chaos_profile,
         agent_trace,
         transcript: tool_transcript.into_record(),
     })
+}
+
+fn build_demo_trace_events(
+    case_id: &str,
+    run_id: u32,
+    agent_trace: &[agent::AgentTraceEntry],
+    transcript: &tooling::ToolTranscriptRecord,
+) -> Result<Vec<model::TraceEvent>> {
+    let mut events = Vec::new();
+    let mut calls_by_step = trace::index_tool_calls_by_step(&transcript.entries);
+    for calls in calls_by_step.values_mut() {
+        calls.sort_by_key(|call| call.tool_call_idx);
+    }
+
+    let mut event_step = 0u32;
+    for entry in agent_trace {
+        let payload = serde_json::json!({
+            "kind": "agent_trace",
+            "payload": entry,
+        });
+        let content = canonical_json::to_vec(&payload)?;
+        let content =
+            String::from_utf8(content).context("agent trace content must be UTF-8")?;
+        events.push(model::TraceEvent {
+            schema_version: model::TRACE_SCHEMA_VERSION,
+            run_id,
+            case_id: case_id.to_string(),
+            step: event_step,
+            role: entry.role.clone(),
+            content,
+            entropy_bits: 0,
+            rng_calls: 0,
+        });
+        event_step = event_step.saturating_add(1);
+
+        if let Some(calls) = calls_by_step.get(&entry.step) {
+            for call in calls {
+                let payload = serde_json::json!({
+                    "kind": "tool_call",
+                    "payload": trace::tool_call_witness_value_canonical(call)?,
+                });
+                let content = canonical_json::to_vec(&payload)?;
+                let content =
+                    String::from_utf8(content).context("tool call content must be UTF-8")?;
+                events.push(model::TraceEvent {
+                    schema_version: model::TRACE_SCHEMA_VERSION,
+                    run_id,
+                    case_id: case_id.to_string(),
+                    step: event_step,
+                    role: "tool".to_string(),
+                    content,
+                    entropy_bits: 0,
+                    rng_calls: 0,
+                });
+                event_step = event_step.saturating_add(1);
+            }
+        }
+    }
+
+    Ok(events)
 }
 
 fn apply_demo_regression_to_output(

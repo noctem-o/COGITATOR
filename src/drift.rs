@@ -5,13 +5,14 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::agent::AgentTraceEntry;
+use crate::chaos::FaultRecord;
 use crate::canonical_json;
 use crate::model::WitnessManifest;
 use crate::report::DriftIssue;
 use crate::tooling::{ToolCall, ToolTranscriptRecord};
 use crate::{model::RunMetadata, trace};
 
-pub const DRIFT_SCHEMA_VERSION: u32 = 2;
+pub const DRIFT_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -19,6 +20,25 @@ pub struct DriftReport {
     pub schema_version: u32,
     pub drifted: bool,
     pub issues: Vec<DriftIssue>,
+    pub first_mismatch: Option<DriftMismatchDetail>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DriftMismatchDetail {
+    pub index: u32,
+    pub expected: Option<ToolCallDetail>,
+    pub observed: Option<ToolCallDetail>,
+    pub expected_response_hash: Option<String>,
+    pub observed_response_hash: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolCallDetail {
+    pub tool_name: String,
+    pub arguments: serde_json::Value,
+    pub fault: Option<FaultRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -101,6 +121,7 @@ pub fn detect_transcript_drift(
         schema_version: DRIFT_SCHEMA_VERSION,
         drifted: !issues.is_empty(),
         issues,
+        first_mismatch: first_mismatch_detail(expected, actual),
     }
 }
 
@@ -255,6 +276,55 @@ fn response_hash(response: &crate::tooling::ToolResponse) -> String {
         hasher.update(&bytes);
     }
     hex_string(hasher.finalize().as_bytes())
+}
+
+fn first_mismatch_detail(
+    expected: &ToolTranscriptRecord,
+    actual: &ToolTranscriptRecord,
+) -> Option<DriftMismatchDetail> {
+    let max_len = expected.entries.len().max(actual.entries.len());
+    for index in 0..max_len {
+        let exp = expected.entries.get(index);
+        let act = actual.entries.get(index);
+        if exp.is_none() || act.is_none() {
+            return Some(DriftMismatchDetail {
+                index: index as u32,
+                expected: exp.map(tool_call_detail),
+                observed: act.map(tool_call_detail),
+                expected_response_hash: exp.map(|call| response_hash(&call.response)),
+                observed_response_hash: act.map(|call| response_hash(&call.response)),
+            });
+        }
+
+        let exp = exp.expect("exp is set");
+        let act = act.expect("act is set");
+        let exp_hash = response_hash(&exp.response);
+        let act_hash = response_hash(&act.response);
+        if exp.step != act.step
+            || exp.request != act.request
+            || exp.tool_call_idx != act.tool_call_idx
+            || exp.fault != act.fault
+            || exp_hash != act_hash
+        {
+            return Some(DriftMismatchDetail {
+                index: index as u32,
+                expected: Some(tool_call_detail(exp)),
+                observed: Some(tool_call_detail(act)),
+                expected_response_hash: Some(exp_hash),
+                observed_response_hash: Some(act_hash),
+            });
+        }
+    }
+
+    None
+}
+
+fn tool_call_detail(call: &ToolCall) -> ToolCallDetail {
+    ToolCallDetail {
+        tool_name: call.request.tool_name.clone(),
+        arguments: call.request.arguments.clone(),
+        fault: call.fault.clone(),
+    }
 }
 
 fn initial_hash() -> [u8; 32] {

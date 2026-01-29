@@ -81,6 +81,57 @@
           }
         ]
       }
+    },
+    "first_mismatch": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "index",
+            "expected",
+            "observed",
+            "expected_response_hash",
+            "observed_response_hash"
+          ],
+          "properties": {
+            "index": { "type": "integer", "minimum": 0 },
+            "expected": {
+              "anyOf": [
+                { "type": "null" },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["tool_name", "arguments", "fault"],
+                  "properties": {
+                    "tool_name": { "type": "string" },
+                    "arguments": {},
+                    "fault": { "type": ["object", "null"] }
+                  }
+                }
+              ]
+            },
+            "observed": {
+              "anyOf": [
+                { "type": "null" },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["tool_name", "arguments", "fault"],
+                  "properties": {
+                    "tool_name": { "type": "string" },
+                    "arguments": {},
+                    "fault": { "type": ["object", "null"] }
+                  }
+                }
+              ]
+            },
+            "expected_response_hash": { "type": ["string", "null"] },
+            "observed_response_hash": { "type": ["string", "null"] }
+          }
+        }
+      ]
     }
   }
 }

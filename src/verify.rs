@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
@@ -33,8 +33,24 @@ pub fn verify(meta_path: &Path, trace_path: &Path, expect: &str) -> Result<Strin
         if line.trim().is_empty() {
             continue;
         }
-        let event: TraceEvent = serde_json::from_str(&line)
-            .with_context(|| format!("failed to parse trace line {}", line_idx + 1))?;
+        let event: TraceEvent = serde_json::from_str(&line).map_err(|err| {
+            let trimmed = line.trim();
+            let preview = if trimmed.len() > 80 {
+                &trimmed[..80]
+            } else {
+                trimmed
+            };
+            let mut message = format!("failed to parse trace line {}: {}", line_idx + 1, err);
+            if !preview.is_empty() {
+                message.push_str(&format!(" (line preview: \"{}\")", preview));
+            }
+            if trimmed.starts_with('[') || trimmed.starts_with('{') {
+                message.push_str(
+                    " This looks like JSON array/object; did you mean agent_trace.json? verify expects trace.jsonl (NDJSON).",
+                );
+            }
+            anyhow!(message)
+        })?;
         if event.schema_version != TRACE_SCHEMA_VERSION {
             anyhow::bail!(
                 "trace schema version mismatch at line {}: expected {}, got {}",

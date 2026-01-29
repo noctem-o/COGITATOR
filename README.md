@@ -69,17 +69,14 @@ validate the exact same witness root, even across different machines.
 ```bash
 cargo build --release
 ./target/release/cogitator run --seed 42 --runs 10 --out-dir out --clean
-./target/release/cogitator verify \
-  --meta out/meta.json \
-  --trace out/trace.jsonl \
-  --expect "$(cat out/witness_root.txt)"
+./target/release/cogitator verify --dir out
 ```
 
 PowerShell equivalent (native Windows builds use `.exe` and backslashes):
 
 ```powershell
 .\target\release\cogitator.exe run --seed 42 --runs 10 --out-dir out --clean
-.\target\release\cogitator.exe verify --meta out\meta.json --trace out\trace.jsonl --expect (Get-Content out\witness_root.txt).Trim()
+.\target\release\cogitator.exe verify --dir out
 ```
 
 ## Install prerequisites
@@ -250,10 +247,7 @@ Use the release binary to reproduce runs and verify witnesses:
 
 ```bash
 ./target/release/cogitator run --seed 1 --runs 10 --out-dir out --clean
-./target/release/cogitator verify \
-  --meta out/meta.json \
-  --trace out/trace.jsonl \
-  --expect "$(cat out/witness_root.txt)"
+./target/release/cogitator verify --dir out
 ```
 
 ### Agent record → replay
@@ -278,7 +272,7 @@ Use the release binary to reproduce runs and verify witnesses:
   --fault-profile ci \
   --out-dir demo_out \
   --clean
-./target/release/cogitator verify --witness demo_out/drift/baseline_faults
+./target/release/cogitator verify --dir demo_out/drift/baseline_faults
 ```
 If the scenario name changes, verify any directory under `demo_out/drift/*/` that contains
 `witness_manifest.json`.
