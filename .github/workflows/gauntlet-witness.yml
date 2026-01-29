@@ -1,0 +1,21 @@
+name: Gauntlet Witness Gate
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  gauntlet-witness:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check gauntlet witness root
+        run: ./scripts/check_gauntlet_root.sh

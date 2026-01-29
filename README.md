@@ -29,6 +29,7 @@ environment.
 - [Commitment boundaries](#commitment-boundaries)
 - [Deterministic Simulation Testing (DST)](#deterministic-simulation-testing-dst)
 - [Verification workflow](#verification-workflow-no-makefile)
+- [Gauntlet witness gate](#gauntlet-witness-gate)
 - [Nix (optional)](#nix-optional)
 - [Project layout](#project-layout)
 
@@ -133,6 +134,14 @@ cargo --version
 sudo apt-get update
 sudo apt-get install -y build-essential curl git
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+### Nix
+
+Install Nix (multi-user) if you want the optional dev shell:
+
+```bash
+sh <(curl -L https://nixos.org/nix/install)
 ```
 
 ---
@@ -282,6 +291,27 @@ Use the release binary to reproduce runs and verify witnesses:
 ```
 If the scenario name changes, verify any directory under `demo_out/drift/*/` that contains
 `witness_manifest.json`.
+
+---
+
+## Gauntlet witness gate
+
+The CI gate runs a pinned gauntlet scenario with deterministic settings and checks the
+resulting witness root against a golden value. The gate pins `--faults off` and
+`--fault-profile none` to keep the baseline stable.
+
+Run locally:
+
+```bash
+./scripts/check_gauntlet_root.sh
+```
+
+Regenerate the golden (only when intentionally updating the baseline):
+
+```bash
+./target/release/cogitator run --agent gauntlet --seed 42 --runs 1 --case 0 --out-dir out_ci --clean --no-tui --faults off --fault-profile none
+cp out_ci/run_0000/witness_root.txt goldens/gauntlet_witness_root.txt
+```
 
 ---
 
