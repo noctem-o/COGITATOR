@@ -22,6 +22,9 @@ rm -rf "$OUT_DIR"
   --no-tui \
   --faults off \
   --fault-profile none \
+  --parallel=false \
+  --threads 1 \
+  --pass-threshold 0.5 \
   --nix-provenance off
 
 ROOT="$(cat "${RUN_DIR}/witness_root.txt")"
