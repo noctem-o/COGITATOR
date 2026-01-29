@@ -8,7 +8,7 @@ use crate::agent::AgentTraceEntry;
 use crate::canonical_json;
 use crate::model::WitnessManifest;
 use crate::report::DriftIssue;
-use crate::tooling::{ToolCall, ToolTranscriptRecord};
+use crate::tooling::{ToolCall, ToolOutcome, ToolTranscriptRecord};
 use crate::{model::RunMetadata, trace};
 
 pub const DRIFT_SCHEMA_VERSION: u32 = 2;
@@ -71,7 +71,7 @@ pub fn detect_transcript_drift(
                 actual: act.step,
             });
         }
-        if exp.request != act.request {
+        if exp.tool_name != act.tool_name || exp.request != act.request {
             issues.push(DriftIssue::ToolRequestMismatch {
                 index: index as u32,
             });
@@ -88,8 +88,8 @@ pub fn detect_transcript_drift(
                 index: index as u32,
             });
         }
-        let exp_hash = response_hash(&exp.response);
-        let act_hash = response_hash(&act.response);
+        let exp_hash = outcome_hash(&exp.tool_name, &exp.outcome);
+        let act_hash = outcome_hash(&act.tool_name, &act.outcome);
         if exp_hash != act_hash {
             issues.push(DriftIssue::ToolResponseHashMismatch {
                 index: index as u32,
@@ -244,11 +244,10 @@ pub fn verify_witness_bundle(dir: &Path) -> Result<VerifyReport> {
     Ok(report)
 }
 
-fn response_hash(response: &crate::tooling::ToolResponse) -> String {
+fn outcome_hash(tool_name: &str, outcome: &ToolOutcome) -> String {
     let payload = serde_json::json!({
-        "tool_name": response.tool_name,
-        "output": response.output,
-        "success": response.success,
+        "tool_name": tool_name,
+        "outcome": outcome,
     });
     let mut hasher = Hasher::new();
     if let Ok(bytes) = canonical_json::to_vec(&payload) {

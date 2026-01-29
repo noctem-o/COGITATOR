@@ -4,9 +4,8 @@ use std::collections::HashMap;
 
 use crate::agent::AgentTraceEntry;
 use crate::canonical_json;
-use crate::chaos::FaultRecord;
 use crate::model::{RunMetadata, TraceEvent, WitnessedMetadata};
-use crate::tooling::{ToolCall, ToolRequest};
+use crate::tooling::{ToolCall, ToolOutcome};
 use crate::witness;
 
 #[allow(dead_code)]
@@ -45,19 +44,13 @@ fn to_canonical_json<T: Serialize>(value: &T) -> Result<Vec<u8>> {
 }
 
 #[derive(Serialize)]
-struct ToolResponseWitness {
-    tool_name: String,
-    output: serde_json::Value,
-    success: bool,
-}
-
-#[derive(Serialize)]
 struct ToolCallWitness {
     step: u32,
     tool_call_idx: u32,
-    request: ToolRequest,
-    response: ToolResponseWitness,
-    fault: Option<FaultRecord>,
+    tool_name: String,
+    request: serde_json::Value,
+    outcome: ToolOutcome,
+    fault: Option<crate::tooling::TranscriptFault>,
 }
 
 impl From<&ToolCall> for ToolCallWitness {
@@ -65,12 +58,9 @@ impl From<&ToolCall> for ToolCallWitness {
         Self {
             step: call.step,
             tool_call_idx: call.tool_call_idx,
+            tool_name: call.tool_name.clone(),
             request: call.request.clone(),
-            response: ToolResponseWitness {
-                tool_name: call.response.tool_name.clone(),
-                output: call.response.output.clone(),
-                success: call.response.success,
-            },
+            outcome: call.outcome.clone(),
             fault: call.fault.clone(),
         }
     }
