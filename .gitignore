@@ -2,3 +2,9 @@ out/
 demo_out/
 replay/
 target/
+
+# Cogitator run artifacts
+out_ci/
+out_gauntlet/
+out_replay/
+out_regress/
