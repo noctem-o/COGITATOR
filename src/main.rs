@@ -709,7 +709,7 @@ fn run_agent(args: RunArgs) -> Result<()> {
                     pass_threshold_f32,
                     pass_threshold_witnessed: pass_threshold_witnessed
                         .clone()
-                        .unwrap_or_else(|| "0.5".to_string()),
+                        .unwrap_or_else(|| canonical_threshold_string(0.5)),
                     regress,
                 };
                 let gauntlet_output =
@@ -1059,11 +1059,16 @@ fn build_agent_metadata(
             parallel: false,
             parallel_strategy: "sequential".to_string(),
             case_filter: args.case,
-            entropy_sources: vec![
-                "rng:StdRng(seed)".to_string(),
-                "tooling:stubbed-or-replay".to_string(),
-                "chaos:fault-schedule".to_string(),
-            ],
+            entropy_sources: {
+                let mut sources = vec![
+                    "rng:StdRng(seed)".to_string(),
+                    "tooling:stubbed-or-replay".to_string(),
+                ];
+                if chaos_profile.enabled {
+                    sources.push("chaos:fault-schedule".to_string());
+                }
+                sources
+            },
             total_rng_calls,
             chaos_profile: Some(model::ChaosProfileSummary {
                 enabled: chaos_profile.enabled,
@@ -1108,18 +1113,7 @@ fn parse_pass_threshold(value: &str) -> Result<f32> {
 }
 
 fn canonical_threshold_string(value: f32) -> String {
-    let mut text = format!("{:.6}", value);
-    while text.contains('.') && text.ends_with('0') {
-        text.pop();
-    }
-    if text.ends_with('.') {
-        text.pop();
-    }
-    if text.is_empty() {
-        "0".to_string()
-    } else {
-        text
-    }
+    format!("f32:0x{:08X}", value.to_bits())
 }
 
 fn resolve_chaos_profile(args: &RunArgs, seed: u64) -> chaos::ChaosProfile {

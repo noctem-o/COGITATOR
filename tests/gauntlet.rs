@@ -13,7 +13,10 @@ fn run_gauntlet_root(seed: u64, pass_threshold: &str) -> String {
         run_id: 0,
         case_id: "case".to_string(),
         pass_threshold_f32: pass_threshold.parse().expect("threshold"),
-        pass_threshold_witnessed: pass_threshold.to_string(),
+        pass_threshold_witnessed: format!(
+            "f32:0x{:08X}",
+            pass_threshold.parse::<f32>().expect("threshold").to_bits()
+        ),
         regress: false,
     };
     let output =
@@ -30,11 +33,13 @@ fn run_gauntlet_root(seed: u64, pass_threshold: &str) -> String {
         entropy_sources: vec![
             "rng:StdRng(seed)".to_string(),
             "tooling:stubbed-or-replay".to_string(),
-            "chaos:fault-schedule".to_string(),
         ],
         total_rng_calls: output.total_rng_calls,
         chaos_profile: None,
-        pass_threshold: Some(pass_threshold.to_string()),
+        pass_threshold: Some(format!(
+            "f32:0x{:08X}",
+            pass_threshold.parse::<f32>().expect("threshold").to_bits()
+        )),
     };
     trace::compute_agent_witness_root(&metadata, &output.agent_trace, &record.entries)
         .expect("witness root")
@@ -78,7 +83,7 @@ fn gauntlet_replay_regression_reports_drift() {
         run_id: 0,
         case_id: "case".to_string(),
         pass_threshold_f32: 0.5,
-        pass_threshold_witnessed: "0.5".to_string(),
+        pass_threshold_witnessed: "f32:0x3F000000".to_string(),
         regress: false,
     };
     let mut live_transcript = ToolTranscript::new_live(None);
@@ -106,8 +111,18 @@ fn gauntlet_replay_regression_reports_drift() {
             step,
             tool_name,
             json_pointer,
+            issue_kind,
+            expected,
+            actual,
             ..
-        } => *step == 0 && tool_name == "gauntlet.lookup" && json_pointer == "/payload/tags/0",
+        } => {
+            *step == 0
+                && tool_name == "gauntlet.lookup"
+                && json_pointer == "/payload/tags/0"
+                && issue_kind == "missing"
+                && !expected.is_empty()
+                && actual == "missing"
+        }
         _ => false,
     });
     assert!(has_gauntlet_issue);

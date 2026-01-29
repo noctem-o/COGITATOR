@@ -4,12 +4,12 @@ use sha2::{Digest, Sha256};
 use std::path::Path;
 
 use crate::canonical_json;
-use crate::chaos::{apply_fault, ChaosEngine, FaultRecord};
+use crate::chaos::{apply_fault, ChaosEngine, FaultKind, FaultRecord};
 use crate::llm;
 use crate::llm::LlmBackend;
 use crate::report::DriftIssue;
 
-pub const TOOL_TRANSCRIPT_SCHEMA_VERSION: u32 = 2;
+pub const TOOL_TRANSCRIPT_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -29,14 +29,79 @@ pub struct ToolResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolErrorKind {
+    Timeout,
+    Drop,
+    Corrupt,
+    ToolError,
+}
+
+impl ToolErrorKind {
+    fn as_str(&self) -> &'static str {
+        match self {
+            ToolErrorKind::Timeout => "timeout",
+            ToolErrorKind::Drop => "drop",
+            ToolErrorKind::Corrupt => "corrupt",
+            ToolErrorKind::ToolError => "tool_error",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ToolError {
+    pub error_kind: ToolErrorKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ToolOutcome {
+    Ok {
+        output: serde_json::Value,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        simulated_latency_ms: Option<u64>,
+    },
+    Err {
+        error: ToolError,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        simulated_latency_ms: Option<u64>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum TranscriptFault {
+    Timeout {
+        domain: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        timeout_ms: Option<u64>,
+    },
+    Drop {
+        domain: String,
+    },
+    Corrupt {
+        domain: String,
+        mask: u64,
+    },
+    LatencySim {
+        domain: String,
+        latency_ms: u64,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct ToolCall {
     pub step: u32,
     pub tool_call_idx: u32,
-    pub request: ToolRequest,
-    pub response: ToolResponse,
+    pub tool_name: String,
+    pub request: serde_json::Value,
+    pub outcome: ToolOutcome,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub fault: Option<FaultRecord>,
+    pub fault: Option<TranscriptFault>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -127,16 +192,19 @@ impl ToolTranscript {
                     let original = response.clone();
                     response = apply_fault(&request, response, fault_record).unwrap_or(original);
                 }
+                let outcome = outcome_from_response(&response, fault.as_ref());
                 self.recorded.push(ToolCall {
                     step,
                     tool_call_idx,
-                    request,
-                    response: response.clone(),
-                    fault,
+                    tool_name: request.tool_name.clone(),
+                    request: request.arguments.clone(),
+                    outcome,
+                    fault: fault.as_ref().map(TranscriptFault::from),
                 });
                 response
             }
             ToolMode::Replay => {
+                debug_assert!(self.chaos.is_none(), "replay must not apply chaos");
                 let response = if let Some(expected) = self.expected.get(self.cursor) {
                     if expected.step != step {
                         self.mismatches.push(DriftIssue::ToolStepMismatch {
@@ -152,27 +220,32 @@ impl ToolTranscript {
                             actual: tool_call_idx,
                         });
                     }
-                    if expected.request != request {
+                    if expected.tool_name != request.tool_name
+                        || expected.request != request.arguments
+                    {
                         self.mismatches.push(DriftIssue::ToolRequestMismatch {
                             index: self.cursor as u32,
                         });
                     }
-                    expected.response.clone()
+                    response_from_outcome(&expected.tool_name, &expected.outcome)
                 } else {
                     self.mismatches.push(DriftIssue::UnexpectedToolRequest {
                         index: self.cursor as u32,
                     });
                     stub_response(&request)
                 };
+                let (outcome, fault) = if let Some(expected) = self.expected.get(self.cursor) {
+                    (expected.outcome.clone(), expected.fault.clone())
+                } else {
+                    (outcome_from_response(&response, None), None)
+                };
                 self.recorded.push(ToolCall {
                     step,
                     tool_call_idx,
-                    request,
-                    response: response.clone(),
-                    fault: self
-                        .expected
-                        .get(self.cursor)
-                        .and_then(|expected| expected.fault.clone()),
+                    tool_name: request.tool_name.clone(),
+                    request: request.arguments.clone(),
+                    outcome,
+                    fault,
                 });
                 self.cursor += 1;
                 response
@@ -212,6 +285,114 @@ pub fn read_transcript(path: &Path) -> Result<ToolTranscriptRecord> {
 pub fn write_transcript(path: &Path, record: &ToolTranscriptRecord) -> Result<()> {
     canonical_json::write_json(path, record, "tool transcript")?;
     Ok(())
+}
+
+fn outcome_from_response(response: &ToolResponse, fault: Option<&FaultRecord>) -> ToolOutcome {
+    if response.success {
+        ToolOutcome::Ok {
+            output: response.output.clone(),
+            simulated_latency_ms: response.simulated_latency_ms,
+        }
+    } else {
+        let error_kind = error_kind_from_fault(response, fault);
+        let message = response
+            .output
+            .get("message")
+            .and_then(|value| value.as_str())
+            .map(|value| value.to_string());
+        ToolOutcome::Err {
+            error: ToolError {
+                error_kind,
+                message,
+            },
+            simulated_latency_ms: response.simulated_latency_ms,
+        }
+    }
+}
+
+fn error_kind_from_fault(response: &ToolResponse, fault: Option<&FaultRecord>) -> ToolErrorKind {
+    if let Some(fault) = fault {
+        return match fault.kind {
+            FaultKind::Timeout => ToolErrorKind::Timeout,
+            FaultKind::Drop => ToolErrorKind::Drop,
+            FaultKind::Corrupt => ToolErrorKind::Corrupt,
+            FaultKind::LatencySim => ToolErrorKind::ToolError,
+        };
+    }
+    match response
+        .output
+        .get("error")
+        .and_then(|value| value.as_str())
+    {
+        Some("timeout") => ToolErrorKind::Timeout,
+        Some("drop") => ToolErrorKind::Drop,
+        Some("corrupt") => ToolErrorKind::Corrupt,
+        _ => ToolErrorKind::ToolError,
+    }
+}
+
+fn response_from_outcome(tool_name: &str, outcome: &ToolOutcome) -> ToolResponse {
+    match outcome {
+        ToolOutcome::Ok {
+            output,
+            simulated_latency_ms,
+        } => ToolResponse {
+            tool_name: tool_name.to_string(),
+            output: output.clone(),
+            success: true,
+            simulated_latency_ms: *simulated_latency_ms,
+        },
+        ToolOutcome::Err {
+            error,
+            simulated_latency_ms,
+        } => {
+            let output = match error.error_kind {
+                ToolErrorKind::Drop => serde_json::Value::Null,
+                _ => {
+                    let mut map = serde_json::Map::new();
+                    map.insert(
+                        "error".to_string(),
+                        serde_json::Value::String(error.error_kind.as_str().to_string()),
+                    );
+                    if let Some(message) = error.message.as_ref() {
+                        map.insert(
+                            "message".to_string(),
+                            serde_json::Value::String(message.clone()),
+                        );
+                    }
+                    serde_json::Value::Object(map)
+                }
+            };
+            ToolResponse {
+                tool_name: tool_name.to_string(),
+                output,
+                success: false,
+                simulated_latency_ms: *simulated_latency_ms,
+            }
+        }
+    }
+}
+
+impl From<&FaultRecord> for TranscriptFault {
+    fn from(value: &FaultRecord) -> Self {
+        match value.kind {
+            FaultKind::Timeout => TranscriptFault::Timeout {
+                domain: value.domain.clone(),
+                timeout_ms: None,
+            },
+            FaultKind::Drop => TranscriptFault::Drop {
+                domain: value.domain.clone(),
+            },
+            FaultKind::Corrupt => TranscriptFault::Corrupt {
+                domain: value.domain.clone(),
+                mask: value.params.mask.unwrap_or_default(),
+            },
+            FaultKind::LatencySim => TranscriptFault::LatencySim {
+                domain: value.domain.clone(),
+                latency_ms: value.params.latency_ms.unwrap_or_default(),
+            },
+        }
+    }
 }
 
 fn stub_response(request: &ToolRequest) -> ToolResponse {

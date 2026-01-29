@@ -11,8 +11,8 @@ use cogitator::llm;
 use cogitator::model::{ChaosProfileSummary, WitnessedMetadata, TRACE_SCHEMA_VERSION};
 use cogitator::report::DriftIssue;
 use cogitator::tooling::{
-    ToolCall, ToolMode, ToolRequest, ToolResponse, ToolTranscript, ToolTranscriptRecord,
-    TOOL_TRANSCRIPT_SCHEMA_VERSION,
+    ToolCall, ToolMode, ToolOutcome, ToolRequest, ToolResponse, ToolTranscript,
+    ToolTranscriptRecord, TOOL_TRANSCRIPT_SCHEMA_VERSION,
 };
 use cogitator::trace;
 use cogitator::witness;
@@ -204,14 +204,19 @@ proptest! {
             success: true,
             simulated_latency_ms: None,
         };
+        let outcome = ToolOutcome::Ok {
+            output: response.output.clone(),
+            simulated_latency_ms: response.simulated_latency_ms,
+        };
         let expected = ToolTranscriptRecord {
             schema_version: TOOL_TRANSCRIPT_SCHEMA_VERSION,
             mode: ToolMode::Live,
             entries: vec![ToolCall {
                 step: 0,
                 tool_call_idx: 0,
-                request: request.clone(),
-                response: response.clone(),
+                tool_name: request.tool_name.clone(),
+                request: request.arguments.clone(),
+                outcome: outcome.clone(),
                 fault: None,
             }],
         };
@@ -222,11 +227,9 @@ proptest! {
             entries: vec![ToolCall {
                 step: 0,
                 tool_call_idx: 0,
-                request: ToolRequest {
-                    tool_name: request.tool_name.clone(),
-                    arguments: serde_json::json!({"seed": seed.wrapping_add(1)}),
-                },
-                response,
+                tool_name: request.tool_name.clone(),
+                request: serde_json::json!({"seed": seed.wrapping_add(1)}),
+                outcome,
                 fault: None,
             }],
         };
@@ -271,26 +274,26 @@ fn witness_root_sorts_tool_calls_by_index() {
         success: true,
         simulated_latency_ms: None,
     };
+    let outcome = ToolOutcome::Ok {
+        output: response.output.clone(),
+        simulated_latency_ms: response.simulated_latency_ms,
+    };
 
     let call_a = ToolCall {
         step: 0,
         tool_call_idx: 1,
-        request: ToolRequest {
-            tool_name: "clawdbot.lookup".to_string(),
-            arguments: serde_json::json!({"order": "second"}),
-        },
-        response: response.clone(),
+        tool_name: "clawdbot.lookup".to_string(),
+        request: serde_json::json!({"order": "second"}),
+        outcome: outcome.clone(),
         fault: None,
     };
 
     let call_b = ToolCall {
         step: 0,
         tool_call_idx: 0,
-        request: ToolRequest {
-            tool_name: "clawdbot.lookup".to_string(),
-            arguments: serde_json::json!({"order": "first"}),
-        },
-        response,
+        tool_name: "clawdbot.lookup".to_string(),
+        request: serde_json::json!({"order": "first"}),
+        outcome,
         fault: None,
     };
 
@@ -448,7 +451,6 @@ fn agent_witness_root_invariant_across_thread_counts() {
                         entropy_sources: vec![
                             "rng:StdRng(seed)".to_string(),
                             "tooling:stubbed-or-replay".to_string(),
-                            "chaos:fault-schedule".to_string(),
                         ],
                         total_rng_calls: 0,
                         chaos_profile: None,
