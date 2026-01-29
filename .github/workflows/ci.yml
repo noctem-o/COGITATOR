@@ -7,6 +7,12 @@ on:
 jobs:
   test:
     runs-on: ${{ matrix.os }}
+    env:
+      TZ: UTC
+      LC_ALL: C.UTF-8
+      LANG: C.UTF-8
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: 1
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
@@ -17,13 +23,14 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: 1.93.0
           components: rustfmt
 
       - name: Format
         run: cargo fmt --check
 
       - name: Test
-        run: cargo test
+        run: cargo test --locked
 
       - name: Demo drift (minimal)
         run: cargo run -- demo drift --seed 1 --threads 1 --fault-profile ci --out-dir demo_out --clean
@@ -33,12 +40,23 @@ jobs:
 
   gauntlet-witness:
     runs-on: ubuntu-latest
+    env:
+      TZ: UTC
+      LC_ALL: C.UTF-8
+      LANG: C.UTF-8
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: 1
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.93.0
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2

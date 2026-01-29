@@ -9,7 +9,7 @@ OUT_DIR="out_ci"
 RUN_DIR="${OUT_DIR}/run_0000"
 GOLDEN="goldens/gauntlet_witness_root.txt"
 
-cargo build --release
+cargo build --release --locked
 
 rm -rf "$OUT_DIR"
 "$BIN" run \
@@ -24,7 +24,7 @@ rm -rf "$OUT_DIR"
   --fault-profile none \
   --nix-provenance off
 
-ROOT="$(cat "${RUN_DIR}/witness_root.txt")"
+ROOT="$(tr -d '\r\n' < "${RUN_DIR}/witness_root.txt")"
 
 if [[ ! -f "$GOLDEN" ]]; then
   echo "Missing golden file: $GOLDEN"
@@ -33,12 +33,17 @@ if [[ ! -f "$GOLDEN" ]]; then
   exit 2
 fi
 
-EXPECTED="$(cat "$GOLDEN")"
+EXPECTED="$(tr -d '\r\n' < "$GOLDEN")"
 
 if [[ "$ROOT" != "$EXPECTED" ]]; then
   echo "Witness root changed!"
   echo "expected: $EXPECTED"
   echo "actual:   $ROOT"
+  printf 'EXPECTED=%q\n' "$EXPECTED"
+  printf 'ACTUAL=%q\n' "$ROOT"
+  sha256sum "$GOLDEN" "${RUN_DIR}/witness_root.txt" || true
+  od -An -tx1 -c "$GOLDEN" | head -20 || true
+  od -An -tx1 -c "${RUN_DIR}/witness_root.txt" | head -20 || true
   echo
   echo "Drift report:"
   cat "${RUN_DIR}/drift_report.json"
