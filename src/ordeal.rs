@@ -79,8 +79,14 @@ pub struct TaskSuite {
 }
 
 impl TaskSuite {
+    pub fn load_default() -> Result<Self> {
+        let path = resolve_task_path(ORDEAL_TASKS_PATH)?;
+        Self::load(&path)
+    }
+
     pub fn load(path: &Path) -> Result<Self> {
-        let file = File::open(path).with_context(|| "failed to open ordeal tasks")?;
+        let file =
+            File::open(path).with_context(|| format!("failed to open ordeal tasks at {}", path.display()))?;
         let tasks: Vec<TaskSpec> =
             serde_json::from_reader(file).with_context(|| "failed to parse ordeal tasks")?;
         validate_tasks(&tasks)?;
