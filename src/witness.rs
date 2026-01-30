@@ -74,32 +74,32 @@ mod tests {
     fn test_witness_determinism() {
         let metadata = b"metadata";
         let events = [b"event1".as_slice(), b"event2".as_slice()];
-        
+
         let mut w1 = Witness::new(metadata).unwrap();
         for event in &events {
             w1.update(event).unwrap();
         }
-        
+
         let mut w2 = Witness::new(metadata).unwrap();
         for event in &events {
             w2.update(event).unwrap();
         }
-        
+
         assert_eq!(w1.finalize_hex(), w2.finalize_hex());
     }
 
     #[test]
     fn test_witness_order_sensitivity() {
         let metadata = b"metadata";
-        
+
         let mut w1 = Witness::new(metadata).unwrap();
         w1.update(b"A").unwrap();
         w1.update(b"B").unwrap();
-        
+
         let mut w2 = Witness::new(metadata).unwrap();
         w2.update(b"B").unwrap();
         w2.update(b"A").unwrap();
-        
+
         assert_ne!(w1.finalize_hex(), w2.finalize_hex());
     }
 }
