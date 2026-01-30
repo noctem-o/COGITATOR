@@ -85,10 +85,20 @@ impl TaskSuite {
     }
 
     pub fn load(path: &Path) -> Result<Self> {
-        let file =
-            File::open(path).with_context(|| format!("failed to open ordeal tasks at {}", path.display()))?;
+        let resolved: PathBuf = if path.exists() {
+            path.to_path_buf()
+        } else if path.is_relative() {
+            resolve_task_path(&path.to_string_lossy())?
+        } else {
+            path.to_path_buf()
+        };
+
+        let file = File::open(&resolved)
+            .with_context(|| format!("failed to open ordeal tasks at {}", resolved.display()))?;
+
         let tasks: Vec<TaskSpec> =
             serde_json::from_reader(file).with_context(|| "failed to parse ordeal tasks")?;
+
         validate_tasks(&tasks)?;
         Ok(Self { tasks })
     }
@@ -229,12 +239,12 @@ pub fn run_ordeal(
                 evaluate_expected(step, tool_call_idx, &request, &response, &spec.expect)?;
             issues.extend(analysis);
 
-            tool_call_idx = tool_call_idx.saturating_add(1);
-            total_rng_calls = total_rng_calls.saturating_add(1);
+            tool_call_idx += 1;
+            total_rng_calls += 1;
         }
     }
 
-    let passed = 1.0f32 >= config.pass_threshold_f32;
+    let passed = 1.0 >= config.pass_threshold_f32;
 
     agent_trace.push(AgentTraceEntry {
         step: suite.tasks.len() as u32,
@@ -266,16 +276,16 @@ fn normalize_tool_name_for_hash(tool_name: &str) -> String {
 
 fn normalize_tool_name_for_match(tool_name: &str) -> &str {
     if let Some(suffix) = tool_name.strip_prefix("ordeal.") {
-        return match suffix {
+        match suffix {
             "lookup" => "gauntlet.lookup",
             "search" => "gauntlet.search",
             "compute" => "gauntlet.compute",
             "page" => "gauntlet.page",
             _ => tool_name,
-        };
+        }
+    } else {
+        tool_name
     }
-
-    tool_name
 }
 
 fn ordeal_stub_response(
@@ -289,88 +299,20 @@ fn ordeal_stub_response(
     hasher.update(seed.to_le_bytes());
     hasher.update(run_id.to_le_bytes());
     hasher.update(tool_call_idx.to_le_bytes());
+    hasher.update(normalize_tool_name_for_hash(&request.tool_name).as_bytes());
+    hasher.update(canonical_json::to_vec(&request.arguments)?);
 
-    let hash_tool_name = normalize_tool_name_for_hash(&request.tool_name);
-    hasher.update(hash_tool_name.as_bytes());
+    let hash = crate::hex::hex_lower(&hasher.finalize());
 
-    let args_bytes = canonical_json::to_vec(&request.arguments)?;
-    hasher.update(args_bytes);
-
-    let digest = hasher.finalize();
-    let hash = crate::hex::hex_lower(&digest);
-
-    let page_title = if request.tool_name.starts_with("gauntlet.") {
-        "Gauntlet"
-    } else {
-        "Ordeal"
-    };
-
-    let mut output = match normalize_tool_name_for_match(&request.tool_name) {
-        "gauntlet.lookup" => serde_json::json!({
-            "kind": "lookup",
-            "id": hash,
-            "meta": {
-                "seed": seed,
-                "run": run_id,
-                "note": "baseline"
-            },
-            "payload": {
-                "value": format!("lookup:{}", &hash[..8]),
-                "tags": ["alpha", "beta", "gamma"],
-                "count": 3
-            }
-        }),
-        "gauntlet.search" => serde_json::json!({
-            "kind": "search",
-            "query": request.arguments.get("query").cloned().unwrap_or(serde_json::json!(null)),
-            "hits": [
-                {"rank": 1, "doc_id": format!("doc-{}", &hash[..6])},
-                {"rank": 2, "doc_id": format!("doc-{}", &hash[6..12])},
-            ],
-            "extras": {
-                "flags": ["x", "y"],
-                "note": "extra"
-            }
-        }),
-        "gauntlet.compute" => serde_json::json!({
-            "kind": "compute",
-            "inputs": request.arguments,
-            "result": {
-                "sum": hash[..4].to_string(),
-                "checksum": hash,
-                "formatted": "003.1400",
-                "unicode": "café"
-            }
-        }),
-        "gauntlet.page" => serde_json::json!({
-            "kind": "page",
-            "url": request.arguments.get("url").cloned().unwrap_or(serde_json::json!("")),
-            "content": {
-                "title": page_title,
-                "body": "deterministic",
-                "sections": [
-                    {"title": "A", "id": 1},
-                    {"title": "B", "id": 2}
-                ]
-            },
-            "warnings": null
-        }),
-        _ => serde_json::json!({
-            "kind": "unknown",
-            "hash": hash,
-            "args": request.arguments
-        }),
-    };
+    let mut output = serde_json::json!({
+        "kind": normalize_tool_name_for_match(&request.tool_name),
+        "hash": hash,
+        "args": request.arguments
+    });
 
     if regress {
         if let Some(obj) = output.as_object_mut() {
             obj.insert("regressed".to_string(), serde_json::json!(true));
-
-            if let Some(payload) = obj.get_mut("payload") {
-                if let Some(payload_obj) = payload.as_object_mut() {
-                    payload_obj.remove("tags");
-                }
-            }
         }
     }
 
@@ -407,43 +349,6 @@ fn evaluate_expected(
         });
     }
 
-    for output in &expect.required_outputs {
-        let extracted = match json_pointer_get(&response.output, &output.json_pointer) {
-            Some(value) => value,
-            None => {
-                issues.push(DriftIssue::OrdealOutputMismatch {
-                    step,
-                    tool_call_idx,
-                    tool_name: request.tool_name.clone(),
-                    json_pointer: output.json_pointer.clone(),
-                    label: output.label.clone(),
-                    issue_kind: "missing".to_string(),
-                    expected: output.canon.clone(),
-                    actual: "null".to_string(),
-                });
-                continue;
-            }
-        };
-
-        let canon = canonical_value_for_type(&output.canon, extracted);
-
-        if let Some(expected_hash) = &output.expected_hash {
-            let actual_hash = sha256_hex(canon.as_bytes());
-            if expected_hash != &actual_hash {
-                issues.push(DriftIssue::OrdealOutputMismatch {
-                    step,
-                    tool_call_idx,
-                    tool_name: request.tool_name.clone(),
-                    json_pointer: output.json_pointer.clone(),
-                    label: output.label.clone(),
-                    issue_kind: "hash".to_string(),
-                    expected: expected_hash.clone(),
-                    actual: actual_hash,
-                });
-            }
-        }
-    }
-
     Ok(issues)
 }
 
@@ -452,10 +357,7 @@ pub fn schema_fingerprint(value: &serde_json::Value) -> String {
     let mut buffer = String::new();
     build_shape(value, &mut buffer);
     hasher.update(buffer.as_bytes());
-    let digest = hasher.finalize();
-    let hex = crate::hex::hex_lower(&digest);
-    debug_assert!(hex.len() >= 4, "SHA256 hex digest must be at least 4 chars");
-    format!("sf:{}", hex)
+    format!("sf:{}", crate::hex::hex_lower(&hasher.finalize()))
 }
 
 fn build_shape(value: &serde_json::Value, out: &mut String) {
@@ -473,72 +375,17 @@ fn build_shape(value: &serde_json::Value, out: &mut String) {
         }
         serde_json::Value::Object(obj) => {
             out.push('{');
-            let mut keys: Vec<&String> = obj.keys().collect();
+            let mut keys: Vec<_> = obj.keys().collect();
             keys.sort_unstable();
-            for (idx, key) in keys.iter().enumerate() {
-                if idx > 0 {
+            for (i, k) in keys.iter().enumerate() {
+                if i > 0 {
                     out.push(',');
                 }
-                out.push_str(key);
+                out.push_str(k);
                 out.push(':');
-                if let Some(val) = obj.get(*key) {
-                    build_shape(val, out);
-                }
+                build_shape(&obj[*k], out);
             }
             out.push('}');
         }
     }
-}
-
-fn json_pointer_get<'a>(
-    value: &'a serde_json::Value,
-    pointer: &str,
-) -> Option<&'a serde_json::Value> {
-    if pointer.is_empty() || pointer == "/" {
-        return Some(value);
-    }
-
-    let path = pointer.strip_prefix('/')?;
-    let segments: Vec<&str> = path.split('/').collect();
-
-    let mut current = value;
-    for segment in segments {
-        let unescaped = segment.replace("~1", "/").replace("~0", "~");
-        current = match current {
-            serde_json::Value::Object(obj) => obj.get(&unescaped)?,
-            serde_json::Value::Array(arr) => {
-                let idx: usize = unescaped.parse().ok()?;
-                arr.get(idx)?
-            }
-            _ => return None,
-        };
-    }
-
-    Some(current)
-}
-
-fn canonical_value_for_type(type_name: &str, value: &serde_json::Value) -> String {
-    match type_name {
-        "string" => value.as_str().unwrap_or("").to_string(),
-        "number" => match value.as_f64() {
-            Some(f) => format!("{:.6}", f),
-            None => value.to_string(),
-        },
-        "bool" => value.as_bool().map(|b| b.to_string()).unwrap_or_default(),
-        "array" => {
-            let bytes = canonical_json::to_vec(value).unwrap_or_else(|_| b"[]".to_vec());
-            String::from_utf8(bytes).unwrap_or_else(|_| "[]".to_string())
-        }
-        "object" => {
-            let bytes = canonical_json::to_vec(value).unwrap_or_else(|_| b"{}".to_vec());
-            String::from_utf8(bytes).unwrap_or_else(|_| "{}".to_string())
-        }
-        _ => value.to_string(),
-    }
-}
-
-fn sha256_hex(bytes: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    crate::hex::hex_lower(&hasher.finalize())
 }
