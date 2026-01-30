@@ -35,6 +35,7 @@ mod report;
 mod tooling;
 mod trace;
 mod verify;
+mod hex;
 mod witness;
 
 #[cfg(feature = "tui")]
