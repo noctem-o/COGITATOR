@@ -78,16 +78,28 @@ pub fn build_hash_chain(
     let mut chain = Vec::new();
     let mut hasher = Sha256::new();
 
-    for entry in agent_trace {
-        let entry_bytes = canonical_json::to_vec(&entry)?;
-        hasher.update(&entry_bytes);
-        chain.push(crate::hex::encode(&hasher.finalize_reset()));
+    // Index tool calls by step, reusing the same logic as the witness root
+    let mut calls_by_step = crate::trace::index_tool_calls_by_step(tool_calls);
+
+    for calls in calls_by_step.values_mut() {
+        // Ensure deterministic order within a step
+        calls.sort_by_key(|call| call.tool_call_idx);
     }
 
-    for call in tool_calls {
-        let call_bytes = crate::trace::encode_tool_call(call)?;
-        hasher.update(&call_bytes);
+    for entry in agent_trace {
+        // 1) Hash the agent step
+        let entry_bytes = canonical_json::to_vec(entry)?;
+        hasher.update(&entry_bytes);
         chain.push(crate::hex::encode(&hasher.finalize_reset()));
+
+        // 2) Hash all tool calls for this step, in index order
+        if let Some(calls) = calls_by_step.get(&entry.step) {
+            for call in calls {
+                let call_bytes = crate::trace::encode_tool_call(call)?;
+                hasher.update(&call_bytes);
+                chain.push(crate::hex::encode(&hasher.finalize_reset()));
+            }
+        }
     }
 
     Ok(chain)
