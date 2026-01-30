@@ -71,11 +71,13 @@ pub fn detect_transcript_drift(
                 actual: act.step,
             });
         }
+
         if exp.tool_name != act.tool_name || exp.request != act.request {
             issues.push(DriftIssue::ToolRequestMismatch {
                 index: index as u32,
             });
         }
+
         if exp.tool_call_idx != act.tool_call_idx {
             issues.push(DriftIssue::ToolCallIndexMismatch {
                 index: index as u32,
@@ -83,11 +85,13 @@ pub fn detect_transcript_drift(
                 actual: act.tool_call_idx,
             });
         }
+
         if exp.fault != act.fault {
             issues.push(DriftIssue::ToolFaultMismatch {
                 index: index as u32,
             });
         }
+
         let exp_hash = outcome_hash(&exp.tool_name, &exp.outcome);
         let act_hash = outcome_hash(&act.tool_name, &act.outcome);
         if exp_hash != act_hash {
@@ -110,6 +114,7 @@ pub fn build_hash_chain(
 ) -> Result<Vec<String>> {
     let mut chain = Vec::new();
     let mut current = initial_hash();
+
     let mut calls_by_step = trace::index_tool_calls_by_step(tool_calls);
     for calls in calls_by_step.values_mut() {
         calls.sort_by_key(|call| call.tool_call_idx);
@@ -121,7 +126,7 @@ pub fn build_hash_chain(
             "payload": entry,
         });
         current = chained_hash(&current, &payload)?;
-        chain.push(hex_string(&current));
+        chain.push(crate::hex::encode(&current));
 
         if let Some(calls) = calls_by_step.get_mut(&entry.step) {
             for call in calls.iter() {
@@ -130,7 +135,7 @@ pub fn build_hash_chain(
                     "payload": trace::tool_call_witness_value_canonical(call)?,
                 });
                 current = chained_hash(&current, &payload)?;
-                chain.push(hex_string(&current));
+                chain.push(crate::hex::encode(&current));
             }
         }
     }
@@ -156,6 +161,7 @@ pub fn verify_witness_bundle(dir: &Path) -> Result<VerifyReport> {
         .with_context(|| "failed to parse tool_transcript.json")?;
 
     let chain = build_hash_chain(&agent_trace, &tool_transcript.entries)?;
+
     let expected_chain = std::fs::read_to_string(&manifest.hash_chain_txt)
         .with_context(|| "failed to read hash_chain.txt")?;
     let expected_lines: Vec<&str> = expected_chain
@@ -192,9 +198,11 @@ pub fn verify_witness_bundle(dir: &Path) -> Result<VerifyReport> {
             .as_ref()
             .map(|actual| actual == expected_hash)
             .unwrap_or(false);
+
         if !ok {
             issues.push(format!("artifact hash mismatch: {}", path));
         }
+
         artifact_results.push(ArtifactCheck {
             path: path.clone(),
             expected_hash: expected_hash.clone(),
@@ -244,16 +252,19 @@ pub fn verify_witness_bundle(dir: &Path) -> Result<VerifyReport> {
     Ok(report)
 }
 
+#[inline]
 fn outcome_hash(tool_name: &str, outcome: &ToolOutcome) -> String {
     let payload = serde_json::json!({
         "tool_name": tool_name,
         "outcome": outcome,
     });
+
     let mut hasher = Hasher::new();
     if let Ok(bytes) = canonical_json::to_vec(&payload) {
         hasher.update(&bytes);
     }
-    hex_string(hasher.finalize().as_bytes())
+
+    crate::hex::encode(hasher.finalize().as_bytes())
 }
 
 fn initial_hash() -> [u8; 32] {
@@ -268,14 +279,6 @@ fn chained_hash(previous: &[u8; 32], payload: &serde_json::Value) -> Result<[u8;
     let bytes = canonical_json::to_vec(payload).context("serialize hash payload")?;
     hasher.update(&bytes);
     Ok(*hasher.finalize().as_bytes())
-}
-
-fn hex_string(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        out.push_str(&format!("{:02x}", byte));
-    }
-    out
 }
 
 pub fn artifact_hashes(paths: &[&Path]) -> Result<BTreeMap<String, String>> {
@@ -295,7 +298,7 @@ fn bundle_hash_from_map(artifacts: &BTreeMap<String, String>) -> Result<String> 
     let bytes = canonical_json::to_vec(artifacts)?;
     let mut hasher = Hasher::new();
     hasher.update(&bytes);
-    Ok(hex_string(hasher.finalize().as_bytes()))
+    Ok(crate::hex::encode(hasher.finalize().as_bytes()))
 }
 
 fn hash_file(path: &Path) -> Result<String> {
@@ -303,7 +306,7 @@ fn hash_file(path: &Path) -> Result<String> {
         .with_context(|| format!("failed to read artifact {}", path.display()))?;
     let mut hasher = Hasher::new();
     hasher.update(&bytes);
-    Ok(hex_string(hasher.finalize().as_bytes()))
+    Ok(crate::hex::encode(hasher.finalize().as_bytes()))
 }
 
 fn compute_agent_witness_root(
