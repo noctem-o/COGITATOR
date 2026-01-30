@@ -495,8 +495,14 @@ fn canonical_value_for_type(type_name: &str, value: &serde_json::Value) -> Strin
             None => value.to_string(),
         },
         "bool" => value.as_bool().map(|b| b.to_string()).unwrap_or_default(),
-        "array" => canonical_json::to_string(value).unwrap_or_else(|_| "[]".to_string()),
-        "object" => canonical_json::to_string(value).unwrap_or_else(|_| "{}".to_string()),
+        "array" => {
+            let bytes = canonical_json::to_vec(value).unwrap_or_else(|_| b"[]".to_vec());
+            String::from_utf8(bytes).unwrap_or_else(|_| "[]".to_string())
+        }
+        "object" => {
+            let bytes = canonical_json::to_vec(value).unwrap_or_else(|_| b"{}".to_vec());
+            String::from_utf8(bytes).unwrap_or_else(|_| "{}".to_string())
+        }
         _ => value.to_string(),
     }
 }
