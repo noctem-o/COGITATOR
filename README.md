@@ -197,7 +197,7 @@ For a clean CI-style run (no interactive UI):
 ./target/release/cogitator run --seed 42 --runs 100 --out-dir out
 ```
 
-Useful knobs (exact flags may vary by build):
+Useful toggles (exact flags may vary by build):
 
 - `--parallel true|false`
 - `--created-at <string>` (provenance override)
@@ -220,7 +220,7 @@ Useful knobs (exact flags may vary by build):
   --clean
 ```
 
-Agent/replay-only knobs:
+Agent/replay-only toggles:
 
 - `--threads <n>` (affects throughput only; recorded in provenance)
 - `--faults on|off`
