@@ -13,9 +13,9 @@ Cogitator captures full causal traces, records entropy usage (when applicable), 
 byte-stable artifacts so third parties can verify the same results from the same inputs and
 environment.
 
-![Rust](https://img.shields.io/badge/Rust-stable-orange?logo=rust&logoColor=white)
-![Deterministic](https://img.shields.io/badge/Deterministic-Yes-4c1)
-![Witnessed](https://img.shields.io/badge/Witnessed-Yes-6a5acd)
+![Rust](https://img.shields.io/badge/Rust-stable-orange?style=flat-square&logo=rust&logoColor=white)
+![Deterministic](https://img.shields.io/badge/Deterministic-Yes-4c1?style=flat-square)
+![Witnessed](https://img.shields.io/badge/Witnessed-Yes-6a5acd?style=flat-square)
 
 ## Table of contents
 
