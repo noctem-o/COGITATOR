@@ -63,8 +63,7 @@ validate the same witness root, and pinpoint drift when something changes.
 
 Agents:
 - `ordeal` — deterministic task-suite agent designed for CI gating and drift diagnostics.
-- `clawdbot` — placeholder agent name for expansion.
-- `gauntlet` — legacy alias for `ordeal`.
+- `openclaw` — placeholder agent name for expansion.
 
 ---
 
