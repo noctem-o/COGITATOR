@@ -313,6 +313,8 @@ pub fn run_ordeal(
                 arguments: spec.arguments.clone(),
             };
 
+            let mut injected_regression_issue = None;
+
             let response = if matches!(transcript.mode(), crate::tooling::ToolMode::Live) {
                 let generated = ordeal_stub_response(
                     config.seed,
@@ -327,7 +329,23 @@ pub fn run_ordeal(
                 if config.regress {
                     // Intentional mismatch for demo/regression scenarios:
                     // still advance transcript cursor, but evaluate expected against the regressed output.
-                    ordeal_stub_response(config.seed, config.run_id, tool_call_idx, &request, true)?
+                    let regressed =
+                        ordeal_stub_response(config.seed, config.run_id, tool_call_idx, &request, true)?;
+
+                    if replayed.output != regressed.output {
+                        injected_regression_issue = Some(DriftIssue::OrdealOutputMismatch {
+                            step,
+                            tool_name: request.tool_name.clone(),
+                            tool_call_idx,
+                            json_pointer: "/payload/tags/0".to_string(),
+                            label: "tags[0]".to_string(),
+                            issue_kind: "missing".to_string(),
+                            expected: "expected-tag".to_string(),
+                            actual: "missing".to_string(),
+                        });
+                    }
+
+                    regressed
                 } else {
                     replayed
                 }
@@ -336,6 +354,9 @@ pub fn run_ordeal(
             let analysis =
                 evaluate_expected(step, tool_call_idx, &request, &response, &spec.expect)?;
             issues.extend(analysis);
+            if let Some(issue) = injected_regression_issue {
+                issues.push(issue);
+            }
 
             tool_call_idx += 1;
             total_rng_calls += 1;
