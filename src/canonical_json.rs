@@ -5,6 +5,15 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
 
+/// Canonical JSON scheme used for witnessed material.
+///
+/// This is a deterministic, project-specific scheme (not RFC 8785/JCS):
+/// - object keys are recursively sorted lexicographically,
+/// - arrays preserve order,
+/// - output uses compact JSON encoding (no insignificant whitespace),
+/// - floating-point numbers are rejected at runtime in all build profiles.
+///
+/// Rejecting floats avoids implementation-defined formatting drift across toolchains.
 pub fn to_vec<T: Serialize>(value: &T) -> Result<Vec<u8>> {
     let value = serde_json::to_value(value).context("serialize to json value")?;
     ensure_no_floats(&value)?;

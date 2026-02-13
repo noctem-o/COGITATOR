@@ -1012,6 +1012,9 @@ fn verify_cmd(args: VerifyArgs) -> Result<()> {
             receipt.matched, receipt.expected, receipt.computed
         );
         if !receipt.matched {
+            if let Some(component) = receipt.differing_component.as_deref() {
+                eprintln!("Committed component hint: {}", component);
+            }
             anyhow::bail!("recomputed witness_root mismatch");
         }
         return Ok(());

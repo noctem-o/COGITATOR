@@ -6,7 +6,10 @@ use std::path::Path;
 use crate::agent::AgentTraceEntry;
 use crate::model::{RunMetadata, TraceEvent, WitnessManifest, TRACE_SCHEMA_VERSION};
 use crate::tooling::ToolTranscriptRecord;
-use crate::trace::{compute_agent_witness_root, encode_event, encode_witnessed_metadata};
+use crate::trace::{
+    compute_agent_witness_root, encode_agent_trace_entry, encode_event, encode_tool_call_witness,
+    encode_witnessed_metadata, index_tool_calls_by_step,
+};
 use crate::witness::Witness;
 
 #[derive(Debug, Clone)]
@@ -14,6 +17,7 @@ pub struct WitnessRootRecomputeReceipt {
     pub expected: String,
     pub computed: String,
     pub matched: bool,
+    pub differing_component: Option<String>,
 }
 
 fn preview_80(s: &str) -> String {
@@ -192,9 +196,43 @@ pub fn recompute_agent_witness_root_from_bundle(
     let computed =
         compute_agent_witness_root(&metadata.witnessed, &agent_trace, &transcript.entries)?;
 
+    let differing_component = if computed == expected {
+        None
+    } else {
+        detect_agent_witness_component_diff(&metadata.witnessed, &agent_trace, &transcript)?
+    };
+
     Ok(WitnessRootRecomputeReceipt {
         matched: computed == expected,
         expected,
         computed,
+        differing_component,
     })
+}
+
+fn detect_agent_witness_component_diff(
+    witnessed: &crate::model::WitnessedMetadata,
+    agent_trace: &[AgentTraceEntry],
+    transcript: &ToolTranscriptRecord,
+) -> Result<Option<String>> {
+    let mut witness = Witness::new(&encode_witnessed_metadata(witnessed)?)?;
+    let mut calls_by_step = index_tool_calls_by_step(&transcript.entries);
+    for calls in calls_by_step.values_mut() {
+        calls.sort_by_key(|call| call.tool_call_idx());
+    }
+
+    for entry in agent_trace {
+        witness.update(&encode_agent_trace_entry(entry)?)?;
+        if let Some(calls) = calls_by_step.get_mut(&entry.step) {
+            for call in calls.iter() {
+                witness.update(&encode_tool_call_witness(call)?)?;
+            }
+        }
+    }
+
+    // Bundle is self-consistent if we got here; mismatch is against an external expected root.
+    Ok(Some(
+        "expected root differs from recomputed semantic witness path (metadata/agent_trace/tool_calls)"
+            .to_string(),
+    ))
 }

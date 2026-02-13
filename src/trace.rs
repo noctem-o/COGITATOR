@@ -26,15 +26,13 @@ pub fn encode_agent_trace_entry(entry: &AgentTraceEntry) -> Result<Vec<u8>> {
     to_canonical_json(&witness_entry)
 }
 
-pub fn encode_tool_call(call: &ToolCall) -> Result<Vec<u8>> {
-    let witness_call = ToolCallWitnessView::from(call);
-    to_canonical_json(&witness_call)
+pub fn encode_tool_call_witness(call: &ToolCallWitnessView) -> Result<Vec<u8>> {
+    to_canonical_json(call)
 }
 
 #[allow(dead_code)]
 pub fn tool_call_witness_value_canonical(call: &ToolCall) -> Result<serde_json::Value> {
-    let witness_call = ToolCallWitnessView::from(call);
-    canonical_json::to_value(&witness_call)
+    canonical_json::to_value(&ToolCallWitnessView::from(call))
 }
 
 fn to_canonical_json<T: Serialize>(value: &T) -> Result<Vec<u8>> {
@@ -150,6 +148,16 @@ pub struct ToolCallWitnessView {
     fault: Option<TranscriptFaultWitnessView>,
 }
 
+impl ToolCallWitnessView {
+    pub fn tool_call_idx(&self) -> u32 {
+        self.tool_call_idx
+    }
+}
+
+pub fn tool_call_witness_view(call: &ToolCall) -> ToolCallWitnessView {
+    ToolCallWitnessView::from(call)
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum TranscriptFaultWitnessView {
@@ -208,7 +216,7 @@ pub fn compute_agent_witness_root(
         witness.update(&entry_bytes)?;
         if let Some(calls) = calls_by_step.get_mut(&entry.step) {
             for call in calls.iter() {
-                let call_bytes = encode_tool_call(call)?;
+                let call_bytes = encode_tool_call_witness(call)?;
                 witness.update(&call_bytes)?;
             }
         }
@@ -217,10 +225,12 @@ pub fn compute_agent_witness_root(
     Ok(witness.finalize_hex())
 }
 
-pub fn index_tool_calls_by_step(tool_calls: &[ToolCall]) -> HashMap<u32, Vec<&ToolCall>> {
-    let mut map: HashMap<u32, Vec<&ToolCall>> = HashMap::new();
+pub fn index_tool_calls_by_step(tool_calls: &[ToolCall]) -> HashMap<u32, Vec<ToolCallWitnessView>> {
+    let mut map: HashMap<u32, Vec<ToolCallWitnessView>> = HashMap::new();
     for call in tool_calls {
-        map.entry(call.step).or_default().push(call);
+        map.entry(call.step)
+            .or_default()
+            .push(tool_call_witness_view(call));
     }
     map
 }
