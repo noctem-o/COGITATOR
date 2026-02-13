@@ -432,7 +432,7 @@ fn stub_hash_is_canonical_for_request_arguments() {
 
 #[test]
 fn agent_witness_root_invariant_across_thread_counts() {
-    let roots: Vec<String> = [1usize, 2, 4]
+    let roots: Vec<String> = [1usize, 2, 4, 8]
         .iter()
         .map(|threads| {
             ThreadPoolBuilder::new()
@@ -491,6 +491,55 @@ fn agent_witness_root_invariant_across_thread_counts() {
         .collect();
 
     assert!(roots.iter().all(|root| root == &roots[0]));
+}
+
+#[test]
+fn witness_root_changes_on_semantic_output_change() {
+    let metadata = WitnessedMetadata {
+        schema_version: TRACE_SCHEMA_VERSION,
+        seed: 3,
+        requested_runs: 1,
+        executed_runs: 1,
+        parallel: false,
+        parallel_strategy: "sequential".to_string(),
+        case_filter: Some(0),
+        entropy_sources: vec![],
+        total_rng_calls: 0,
+        chaos_profile: None,
+        pass_threshold: None,
+    };
+    let agent_trace = vec![AgentTraceEntry {
+        step: 0,
+        role: "assistant".to_string(),
+        thought: "x".to_string(),
+        action: "y".to_string(),
+        tool_requests: vec![],
+        is_final: true,
+    }];
+
+    let call_a = ToolCall {
+        step: 0,
+        tool_call_idx: 0,
+        tool_name: "clawdbot.lookup".to_string(),
+        request: serde_json::json!({"k": "v"}),
+        outcome: ToolOutcome::Ok {
+            output: serde_json::json!({"result": 1}),
+            simulated_latency_ms: None,
+        },
+        fault: None,
+    };
+
+    let call_b = ToolCall {
+        outcome: ToolOutcome::Ok {
+            output: serde_json::json!({"result": 2}),
+            simulated_latency_ms: None,
+        },
+        ..call_a.clone()
+    };
+
+    let root_a = witness_root_for_agent(&metadata, &agent_trace, &[call_a]);
+    let root_b = witness_root_for_agent(&metadata, &agent_trace, &[call_b]);
+    assert_ne!(root_a, root_b);
 }
 
 #[test]

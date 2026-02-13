@@ -288,6 +288,7 @@ Cogitator draws a strict line between what is **witnessed** and what is **proven
 
 - **Witness root** commits to canonical trace entries plus (in agent mode) agent trace entries and tool-call witness views in deterministic order.
   Simulated latency and runtime environment details are excluded.
+  Tool-call commitments are computed from explicit witness-view types (not full transcript structs), so provenance-only fields cannot be accidentally pulled into witnessed bytes.
 - **Provenance metadata** captures run-time context (timestamps, toolchain versions, agent thread count, platform notes, optional Nix details) and is **not** part of the witness root.
 - **Bundle hash** covers all artifacts listed in `witness_manifest.json` (including optional provenance artifacts) for offline verification.
 
@@ -348,6 +349,14 @@ Example:
 - `witness_manifest.json` bundle hash + per-artifact hashes
 - witness-root consistency
 - drift report integrity (and writes `verify_report.json` into the bundle directory)
+
+Use semantic witness recompute mode to validate the committed root against bundle semantics:
+
+```bash
+./target/release/cogitator verify --witness out/run_0000 --recompute-witness-root
+```
+
+On mismatch, Cogitator prints expected vs computed root and a committed-component hint.
 
 ---
 
