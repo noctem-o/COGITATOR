@@ -8,21 +8,31 @@ on:
 jobs:
   dist:
     permissions:
-      contents: read
+      contents: write
       id-token: write
       attestations: write
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.2.2
 
-      - name: Run cargo-dist
-        uses: axodotdev/cargo-dist-action@v1
-        with:
-          dist-version: latest
-          args: build --artifacts=global
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Install cargo-dist
+        run: cargo install --locked cargo-dist --version 0.28.0
+
+      - name: Build release artifacts
+        run: cargo dist build --artifacts=global
+
+      - name: Publish GitHub release and upload artifacts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: cargo dist host --steps=upload
 
       - name: Attest release build provenance
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@e899cf2f73d7dfeae3b3aa1493f8756b5d7f758e # v1.4.4
         with:
           subject-path: dist/*

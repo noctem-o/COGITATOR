@@ -1,8 +1,11 @@
 # RustSec advisory configuration for CI (`rustsec/audit-check`).
 #
-# Escape hatch:
+# Escape hatch policy:
+# - Keep CI fail-closed by default (`ignore = []`).
 # - Add a temporary advisory ID under `ignore` only when there is a tracked,
 #   time-bounded mitigation plan.
+# - Every temporary ignore entry must include an inline comment with a ticket
+#   reference (for example: `# TODO(security): GH-1234 remove after serde fix`).
 # - Prefer upgrading dependencies over suppressing advisories.
 
 [advisories]

@@ -12,12 +12,12 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.2.2
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
 
       - name: Format
         run: cargo fmt --check
@@ -43,6 +43,28 @@ jobs:
           cargo run --locked -- run --seed 99 --runs 5 --out-dir smoke_b --clean --no-tui
           diff -u smoke_a/witness_root.txt smoke_b/witness_root.txt
 
+  release-dry-run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.2.2
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Install cargo-dist
+        run: cargo install --locked cargo-dist --version 0.28.0
+
+      - name: Build release artifacts (dry-run, no publish)
+        run: cargo dist build --artifacts=global
+
+      - name: Verify dist outputs exist
+        run: |
+          test -d dist
+          test -n "$(find dist -maxdepth 1 -type f | head -n 1)"
+
   no-git-build:
     runs-on: ubuntu-latest
     defaults:
@@ -50,13 +72,12 @@ jobs:
         shell: bash
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.2.2
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
 
       - name: Build and smoke test without .git and without git on PATH
         run: |
@@ -79,6 +100,8 @@ jobs:
             exit 1
           fi
 
+          command -v cargo
+          command -v rustup
           cargo build --locked
           cargo test --locked -q --test version_output
           ./target/debug/cogitator --version | tee version.txt
@@ -91,20 +114,19 @@ jobs:
         shell: bash
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.2.2
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
 
       - name: Check ordeal witness root
         run: cargo run --locked -- ordeal check --golden goldens/ordeal_witness_root.txt
 
       - name: Upload ordeal witness artifacts on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.6.2
         with:
           name: ordeal-witness-artifacts
           path: |
@@ -116,13 +138,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.2.2
 
       - name: RustSec advisory audit
         uses: rustsec/audit-check@v2
