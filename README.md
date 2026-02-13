@@ -402,7 +402,7 @@ Cogitator is set up for release automation with:
 - `git-cliff` configuration in `cliff.toml` for changelog generation from commit history.
 - `--version` / `--help` including git SHA metadata when available at build time, with a deterministic `unknown` fallback when `git` metadata is unavailable.
 - CI gates for format, clippy, tests, determinism smoke checks, verify-recompute checks, release dry-runs (`cargo dist build --artifacts=global`), and a true no-git build gate (no `.git/` and no `git` on `PATH`) to keep release builds robust outside a git checkout.
-- A RustSec advisory check via `rustsec/audit-check` (configured by `audit.toml`) as a fail-closed release trust gate, plus `scripts/resolve_audit_check_sha.sh` to record the currently resolved `v2` SHA in CI summaries before maintainers update a full SHA pin. Temporary suppressions must be documented inline in `audit.toml` with a ticket reference.
+- A RustSec advisory check via `rustsec/audit-check` (configured by `audit.toml`) as a fail-closed release trust gate. `scripts/resolve_audit_check_sha.sh` remains available as a maintainer utility when rotating SHA pins. Temporary suppressions must be documented inline in `audit.toml` with a ticket reference.
 - GitHub Artifact Attestations (`actions/attest-build-provenance`) for release artifacts produced by `cargo-dist`.
 - Release workflow permissions are least-privilege: `contents: write` (required for GitHub Release publishing), `id-token: write` (OIDC), and `attestations: write` (artifact attestations).
 

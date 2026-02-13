@@ -136,6 +136,7 @@ fn ordeal_check_command_detects_drift() {
 
     let bin = env!("CARGO_BIN_EXE_cogitator");
     let output = std::process::Command::new(bin)
+        .current_dir(temp.path())
         .arg("ordeal")
         .arg("check")
         .arg("--golden")
@@ -144,6 +145,12 @@ fn ordeal_check_command_detects_drift() {
         .expect("run ordeal check");
 
     assert!(!output.status.success());
+    let agent_trace = temp
+        .path()
+        .join("out_ci")
+        .join("run_0000")
+        .join("agent_trace.json");
+    assert!(agent_trace.exists(), "missing {}", agent_trace.display());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("drift detected"), "stderr: {stderr}");
 }
@@ -155,6 +162,7 @@ fn ordeal_check_command_accepts_matching_golden() {
 
     let bin = env!("CARGO_BIN_EXE_cogitator");
     let update = std::process::Command::new(bin)
+        .current_dir(temp.path())
         .arg("ordeal")
         .arg("check")
         .arg("--golden")
@@ -165,6 +173,7 @@ fn ordeal_check_command_accepts_matching_golden() {
     assert!(update.status.success());
 
     let output = std::process::Command::new(bin)
+        .current_dir(temp.path())
         .arg("ordeal")
         .arg("check")
         .arg("--golden")
@@ -178,4 +187,11 @@ fn ordeal_check_command_accepts_matching_golden() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+
+    let agent_trace = temp
+        .path()
+        .join("out_ci")
+        .join("run_0000")
+        .join("agent_trace.json");
+    assert!(agent_trace.exists(), "missing {}", agent_trace.display());
 }
