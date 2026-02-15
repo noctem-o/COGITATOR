@@ -278,9 +278,9 @@ out/
 
 - `meta.json` – run metadata (witnessed + provenance)
 - `trace.jsonl` – canonical trace events (NDJSON: one JSON object per line; strict JSON parser rejects duplicate keys and non-integer numbers)
-- `results.csv` / `results.json` – case-level results
-- `summary.json` – aggregate metrics
-- `analysis.json` – bundled metadata + summary + results
+- `results.csv` / `results.json` – case-level results (`results.json` uses standard JSON serialization; non-witnessed)
+- `summary.json` – aggregate metrics (standard JSON; non-witnessed)
+- `analysis.json` – bundled metadata + summary + results (standard JSON; non-witnessed)
 - `witness_root.txt` – witness root for the run
 - `run_0000/*` – agent witness bundle (trace + tool transcript + drift + hashes)
 
@@ -297,7 +297,9 @@ Cogitator draws a strict line between what is **witnessed** and what is **proven
 - **Witness root** commits to RFC 8785-style canonical JSON (JCS key ordering) over a strict I-JSON subset (integers only) for trace entries plus (in agent mode) agent trace entries and tool-call witness views in deterministic order.
   Simulated latency and runtime environment details are excluded.
   Tool-call commitments are computed from explicit witness-view types (not full transcript structs), so provenance-only fields cannot be accidentally pulled into witnessed bytes.
-- **Provenance metadata** captures run-time context (timestamps, toolchain versions, agent thread count, platform notes, optional Nix details) and is **not** part of the witness root.
+- **Report artifacts** (`results.json`, `summary.json`, `analysis.json`) use standard JSON serialization, are explicitly non-witnessed, and are not committed to `witness_root`.
+  JSON cannot represent `NaN`/`Infinity`, so report metrics must remain finite.
+- **Provenance metadata** captures run-time context (timestamps, toolchain versions, agent thread count, Rayon thread resolution, platform notes, optional Nix details) and is **not** part of the witness root.
 - **Bundle hash** covers all artifacts listed in `witness_manifest.json` (including optional provenance artifacts) for offline verification.
 
 Witness roots are stable across hardware and thread counts; environment details belong to provenance, not the witness commitment.
@@ -420,6 +422,7 @@ nix develop
 
 Nix metadata is captured as **provenance only** and never alters witness roots.
 On native Windows builds, `--nix-provenance=auto` may resolve to “off (windows)” while still recording the resolution in provenance.
+When `RAYON_NUM_THREADS` is set, Cogitator records both the requested env value and the resolved Rayon thread count in provenance only; this aids reproducibility notes without changing witness semantics.
 
 For deterministic `created_at`, set `SOURCE_DATE_EPOCH` (the dev shell may do this automatically).
 

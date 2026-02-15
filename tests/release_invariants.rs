@@ -81,6 +81,8 @@ fn verify_witness_bundle_recomputes_hashes() {
             cargo_version: None,
             nix_store_path: None,
             agent_threads: Some(1),
+            rayon_threads_requested: None,
+            rayon_threads_resolved: None,
             nix_provenance: None,
             variability_factors: Vec::new(),
         },
