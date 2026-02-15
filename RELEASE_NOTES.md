@@ -1,4 +1,4 @@
-# Release Notes: Cogitator v0.1.0
+# Release Notes: Cogitator 1.0.0
 
 ## What it is
 Cogitator is a deterministic evaluation harness that emits cryptographic witness roots,
