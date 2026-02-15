@@ -75,6 +75,16 @@ pub fn write_atomic_string(path: &Path, label: &str, contents: &str) -> Result<(
     write_atomic_bytes(path, label, contents.as_bytes())
 }
 
+pub fn write_report_json<T: serde::Serialize>(path: &Path, value: &T, label: &str) -> Result<()> {
+    write_atomic(path, label, |file| {
+        serde_json::to_writer(&mut *file, value)
+            .with_context(|| format!("failed to serialize {}", label))?;
+        file.write_all(b"\n")
+            .with_context(|| format!("failed to write newline for {}", label))?;
+        Ok(())
+    })
+}
+
 fn temp_name(base: &str, counter: usize) -> PathBuf {
     PathBuf::from(format!(".{}.tmp.{}", base, counter))
 }
@@ -109,4 +119,28 @@ fn sync_dir(_dir: &Path) -> Result<()> {
             .with_context(|| "failed to sync output dir")?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(serde::Serialize)]
+    struct ReportRow {
+        score: f64,
+    }
+
+    #[test]
+    fn write_report_json_writes_standard_json() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("report.json");
+        let value = ReportRow { score: 0.25 };
+
+        write_report_json(&path, &value, "report.json").expect("write report json");
+        let bytes = std::fs::read(&path).expect("read report json");
+        assert_eq!(
+            std::str::from_utf8(&bytes).expect("utf8"),
+            "{\"score\":0.25}\n"
+        );
+    }
 }

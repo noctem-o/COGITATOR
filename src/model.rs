@@ -94,6 +94,8 @@ pub struct ProvenanceMetadata {
     pub cargo_version: Option<String>,
     pub nix_store_path: Option<String>,
     pub agent_threads: Option<usize>,
+    pub rayon_threads_requested: Option<String>,
+    pub rayon_threads_resolved: Option<usize>,
     pub nix_provenance: Option<NixProvenance>,
     pub variability_factors: Vec<String>,
 }

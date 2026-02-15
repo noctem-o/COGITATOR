@@ -355,6 +355,16 @@ fn run(args: RunArgs) -> Result<()> {
         output.total_rng_calls,
         run_ids.len() as u32,
         nix_provenance.clone(),
+        if args.parallel {
+            std::env::var("RAYON_NUM_THREADS").ok()
+        } else {
+            None
+        },
+        if args.parallel {
+            Some(rayon::current_num_threads())
+        } else {
+            None
+        },
     );
     let meta_path = args.out_dir.join("meta.json");
     canonical_json::write_json(&meta_path, &metadata, "meta.json")?;
@@ -382,10 +392,10 @@ fn run(args: RunArgs) -> Result<()> {
     eval::write_results(&csv_path, &output.results)?;
 
     let results_json_path = args.out_dir.join("results.json");
-    write_report_json(&results_json_path, &output.results, "results.json")?;
+    io_utils::write_report_json(&results_json_path, &output.results, "results.json")?;
 
     let summary_json_path = args.out_dir.join("summary.json");
-    write_report_json(&summary_json_path, &summary, "summary.json")?;
+    io_utils::write_report_json(&summary_json_path, &summary, "summary.json")?;
 
     let manifest = model::ArtifactManifest {
         meta_json: rel_artifact_path(&args.out_dir, &meta_path),
@@ -418,7 +428,7 @@ fn run(args: RunArgs) -> Result<()> {
     };
 
     let analysis_path = args.out_dir.join("analysis.json");
-    write_report_json(&analysis_path, &analysis_bundle, "analysis.json")?;
+    io_utils::write_report_json(&analysis_path, &analysis_bundle, "analysis.json")?;
 
     let tui_enabled = !args.no_tui && cfg!(feature = "tui");
     if tui_enabled {
@@ -465,16 +475,6 @@ fn run(args: RunArgs) -> Result<()> {
     );
 
     Ok(())
-}
-
-fn write_report_json<T: serde::Serialize>(path: &Path, value: &T, label: &str) -> Result<()> {
-    io_utils::write_atomic(path, label, |file| {
-        serde_json::to_writer(&mut *file, value)
-            .with_context(|| format!("failed to serialize {}", label))?;
-        file.write_all(b"\n")
-            .with_context(|| format!("failed to write newline for {}", label))?;
-        Ok(())
-    })
 }
 
 fn demo_cmd(args: DemoArgs) -> Result<()> {
@@ -1204,6 +1204,8 @@ fn build_metadata(
     total_rng_calls: u64,
     executed_runs: u32,
     nix_provenance: Option<model::NixProvenance>,
+    rayon_threads_requested: Option<String>,
+    rayon_threads_resolved: Option<usize>,
 ) -> model::RunMetadata {
     let created_at = resolve_created_at(args);
     let git_rev = git_rev();
@@ -1241,6 +1243,8 @@ fn build_metadata(
             cargo_version,
             nix_store_path,
             agent_threads: None,
+            rayon_threads_requested,
+            rayon_threads_resolved,
             nix_provenance,
             variability_factors,
         },
@@ -1304,6 +1308,8 @@ fn build_agent_metadata(
             cargo_version,
             nix_store_path,
             agent_threads: Some(args.agent_threads()),
+            rayon_threads_requested: None,
+            rayon_threads_resolved: None,
             nix_provenance,
             variability_factors,
         },
