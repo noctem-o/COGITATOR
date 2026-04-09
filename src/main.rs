@@ -722,7 +722,10 @@ fn run_agent(args: RunArgs) -> Result<()> {
             policy_engine.digest
         );
     } else {
-        println!("Policy: allow-all (no policy.toml found at {})", args.policy.display());
+        println!(
+            "Policy: allow-all (no policy.toml found at {})",
+            args.policy.display()
+        );
     }
 
     let run_ids: Vec<u32> = match args.case {
