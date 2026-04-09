@@ -3,8 +3,8 @@ name = "cogitator"
 version = "2.0.0"
 edition = "2021"
 build = "build.rs"
-description = "Deterministic AI agent evaluation harness with cryptographic witness chain and pre-call policy interception"
-license = "MIT"
+description = "Tamper-evident AI agent audit harness with cryptographic witness chain, pre-call policy interception, and byte-stable replay"
+license = "BUSL-1.1"
 
 [features]
 tui = ["dep:ratatui", "dep:crossterm"]
