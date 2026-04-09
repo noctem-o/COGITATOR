@@ -1,6 +1,8 @@
 //! Integration tests for the 2.0 pre-call policy interception layer.
 
-use cogitator::policy::{PhantomDisposition, PolicyDocument, PolicyEngine, PolicyRule, PolicyVerdict};
+use cogitator::policy::{
+    PhantomDisposition, PolicyDocument, PolicyEngine, PolicyRule, PolicyVerdict,
+};
 use cogitator::tooling::{ToolRequest, ToolTranscript};
 
 fn engine_with_rules(rules: Vec<PolicyRule>) -> PolicyEngine {
@@ -49,21 +51,29 @@ fn history_guard_rule(id: &str, pattern: &str, hist_pattern: &str, max: usize) -
         history_tool_pattern: Some(hist_pattern.to_string()),
         history_max_calls: Some(max),
         verdict: PolicyVerdict::Block,
-        reason: format!("budget exceeded: max {} calls matching {}", max, hist_pattern),
+        reason: format!(
+            "budget exceeded: max {} calls matching {}",
+            max, hist_pattern
+        ),
     }
 }
 
 #[test]
 fn blocked_call_produces_phantom_entry_not_tool_call() {
-    let engine = engine_with_rules(vec![
-        block_rule("no-lookup", "clawdbot.lookup", "lookups disabled in this run"),
-    ]);
+    let engine = engine_with_rules(vec![block_rule(
+        "no-lookup",
+        "clawdbot.lookup",
+        "lookups disabled in this run",
+    )]);
 
     let mut transcript = ToolTranscript::new_live(None).with_policy(engine);
     let response = transcript.execute(0, req("clawdbot.lookup"));
 
     assert!(!response.success);
-    assert_eq!(response.output.get("blocked").and_then(|v| v.as_bool()), Some(true));
+    assert_eq!(
+        response.output.get("blocked").and_then(|v| v.as_bool()),
+        Some(true)
+    );
     assert!(response.output.get("reason").is_some());
 
     let record = transcript.into_record();
@@ -80,21 +90,32 @@ fn blocked_call_produces_phantom_entry_not_tool_call() {
 
 #[test]
 fn phantom_call_has_phantom_disposition() {
-    let engine = engine_with_rules(vec![
-        phantom_rule("observe-research", "research.**", "research tools are observe-only"),
-    ]);
+    let engine = engine_with_rules(vec![phantom_rule(
+        "observe-research",
+        "research.**",
+        "research tools are observe-only",
+    )]);
 
     let mut transcript = ToolTranscript::new_live(None).with_policy(engine);
     let response = transcript.execute(1, req("research.fetch"));
 
     assert!(!response.success);
-    assert_eq!(response.output.get("blocked").and_then(|v| v.as_bool()), Some(true));
+    assert_eq!(
+        response.output.get("blocked").and_then(|v| v.as_bool()),
+        Some(true)
+    );
 
     let record = transcript.into_record();
     assert!(record.entries.is_empty());
     assert_eq!(record.phantom_entries.len(), 1);
-    assert_eq!(record.phantom_entries[0].disposition, PhantomDisposition::Phantom);
-    assert_eq!(record.phantom_entries[0].rule_id.as_deref(), Some("observe-research"));
+    assert_eq!(
+        record.phantom_entries[0].disposition,
+        PhantomDisposition::Phantom
+    );
+    assert_eq!(
+        record.phantom_entries[0].rule_id.as_deref(),
+        Some("observe-research")
+    );
 }
 
 #[test]
@@ -109,9 +130,7 @@ fn allowed_call_appears_in_entries_not_phantom() {
 
 #[test]
 fn policy_digest_committed_into_transcript_record() {
-    let engine = engine_with_rules(vec![
-        block_rule("any-block", "clawdbot.*", "blocked"),
-    ]);
+    let engine = engine_with_rules(vec![block_rule("any-block", "clawdbot.*", "blocked")]);
     let digest = engine.digest.clone();
     let mut transcript = ToolTranscript::new_live(None).with_policy(engine);
     let _ = transcript.execute(0, req("clawdbot.lookup"));
@@ -129,9 +148,12 @@ fn allow_all_engine_produces_empty_policy_digest() {
 
 #[test]
 fn history_guard_allows_calls_within_budget() {
-    let engine = engine_with_rules(vec![
-        history_guard_rule("lookup-budget", "clawdbot.*", "clawdbot.*", 2),
-    ]);
+    let engine = engine_with_rules(vec![history_guard_rule(
+        "lookup-budget",
+        "clawdbot.*",
+        "clawdbot.*",
+        2,
+    )]);
     let mut transcript = ToolTranscript::new_live(None).with_policy(engine);
     let r1 = transcript.execute(0, req("clawdbot.lookup"));
     assert!(r1.success);
@@ -144,27 +166,38 @@ fn history_guard_allows_calls_within_budget() {
 
 #[test]
 fn history_guard_blocks_calls_over_budget() {
-    let engine = engine_with_rules(vec![
-        history_guard_rule("lookup-budget", "clawdbot.*", "clawdbot.*", 2),
-    ]);
+    let engine = engine_with_rules(vec![history_guard_rule(
+        "lookup-budget",
+        "clawdbot.*",
+        "clawdbot.*",
+        2,
+    )]);
     let mut transcript = ToolTranscript::new_live(None).with_policy(engine);
     transcript.execute(0, req("clawdbot.lookup"));
     transcript.execute(1, req("clawdbot.lookup"));
     transcript.execute(2, req("clawdbot.lookup"));
     let r3 = transcript.execute(3, req("clawdbot.lookup"));
     assert!(!r3.success);
-    assert_eq!(r3.output.get("blocked").and_then(|v| v.as_bool()), Some(true));
+    assert_eq!(
+        r3.output.get("blocked").and_then(|v| v.as_bool()),
+        Some(true)
+    );
     let record = transcript.into_record();
     assert_eq!(record.entries.len(), 3);
     assert_eq!(record.phantom_entries.len(), 1);
-    assert_eq!(record.phantom_entries[0].rule_id.as_deref(), Some("lookup-budget"));
+    assert_eq!(
+        record.phantom_entries[0].rule_id.as_deref(),
+        Some("lookup-budget")
+    );
 }
 
 #[test]
 fn mixed_run_interleaves_entries_and_phantom_entries() {
-    let engine = engine_with_rules(vec![
-        block_rule("no-trade", "clawdbot.trade", "trading not permitted"),
-    ]);
+    let engine = engine_with_rules(vec![block_rule(
+        "no-trade",
+        "clawdbot.trade",
+        "trading not permitted",
+    )]);
     let mut transcript = ToolTranscript::new_live(None).with_policy(engine);
     transcript.execute(0, req("clawdbot.lookup"));
     transcript.execute(1, req("clawdbot.trade"));
@@ -178,9 +211,11 @@ fn mixed_run_interleaves_entries_and_phantom_entries() {
 
 #[test]
 fn phantom_entry_tool_call_idx_is_sequential_across_mixed_run() {
-    let engine = engine_with_rules(vec![
-        block_rule("no-trade", "clawdbot.trade", "trading not permitted"),
-    ]);
+    let engine = engine_with_rules(vec![block_rule(
+        "no-trade",
+        "clawdbot.trade",
+        "trading not permitted",
+    )]);
     let mut transcript = ToolTranscript::new_live(None).with_policy(engine);
     transcript.execute(0, req("clawdbot.lookup"));
     transcript.execute(0, req("clawdbot.trade"));
