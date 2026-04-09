@@ -40,6 +40,7 @@ fn run_ordeal_root(seed: u64, pass_threshold: &str) -> String {
             "f32:0x{:08X}",
             pass_threshold.parse::<f32>().expect("threshold").to_bits()
         )),
+        ..Default::default()
     };
     trace::compute_agent_witness_root(&metadata, &output.agent_trace, &record.entries)
         .expect("witness root")

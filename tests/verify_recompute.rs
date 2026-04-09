@@ -35,6 +35,7 @@ fn write_bundle(dir: &std::path::Path, call: ToolCall) -> anyhow::Result<String>
             total_rng_calls: 0,
             chaos_profile: None,
             pass_threshold: None,
+            ..Default::default()
         },
         provenance: ProvenanceMetadata {
             created_at: "2024-01-01T00:00:00Z".to_string(),
@@ -66,6 +67,7 @@ fn write_bundle(dir: &std::path::Path, call: ToolCall) -> anyhow::Result<String>
         schema_version: cogitator::tooling::TOOL_TRANSCRIPT_SCHEMA_VERSION,
         mode: ToolMode::Live,
         entries: vec![call],
+        ..Default::default()
     };
 
     let drift_report = drift::DriftReport {
