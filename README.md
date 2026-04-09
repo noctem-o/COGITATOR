@@ -1,17 +1,17 @@
 # COGITATOR
 
-> **Cryptographic auditing and pre-call policy interception for AI agent runs.**
+> **Tamper-evident AI agent audit harness with cryptographic witness chain, pre-call policy interception, and byte-stable replay.**
 
 [![CI](https://img.shields.io/github/actions/workflow/status/noctem-o/COGITATOR/ci.yml?branch=main&label=CI)](https://github.com/noctem-o/COGITATOR/actions)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-COGITATOR is a deterministic evaluation harness and **tamper-evident notary** for AI agent execution. Every run produces a cryptographic witness root — a BLAKE3 hash chain over RFC 8785 canonical JSON — that any third party can recompute independently to verify the record was not altered after the fact. As of v2.0, COGITATOR also intercepts every tool call *before* dispatch, evaluating it against a declarative policy and recording the decision as an auditable, signed artifact.
+COGITATOR lets you prove what your AI agent did, what it tried to do, and what it was blocked from doing. Every run produces a cryptographic witness root -- a BLAKE3 hash chain over RFC 8785 canonical JSON -- that any third party can recompute independently to verify the record was not altered after the fact. As of v2.0, COGITATOR also intercepts every tool call before dispatch, evaluates it against a declarative policy, and records the decision as an auditable artifact committed into the witness chain.
 
 ---
 
 ## The Problem
 
-Modern AI agents are deployed into high-stakes environments — financial trading, medical triage, legal research, critical infrastructure — where they issue tool calls with real-world consequences. The current state of the art offers almost no verifiable answer to the three questions that matter most:
+AI agents are being deployed into regulated environments -- financial trading, medical triage, legal research, critical infrastructure -- where they issue tool calls with real-world consequences. The current state of the art offers almost no verifiable answer to the three questions that matter most:
 
 1. **Did the agent do exactly what the log says it did?** Logs are mutable. Post-hoc summaries are reconstructions.
 2. **Was the agent operating within its sanctioned boundaries at the time of the call?** Runtime policy is typically advisory, unenforced, or checked after the fact.
@@ -24,38 +24,38 @@ COGITATOR is a direct answer to all three.
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                          Agent Loop                              │
-│   AgentInput → Agent::step() → AgentOutput (tool_requests)      │
-└────────────────────────────┬─────────────────────────────────────┘
-                             │  tool_requests
-                             ▼
-┌──────────────────────────────────────────────────────────────────┐
-│               ToolTranscript::execute()    ◄── 2.0 INTERCEPT     │
-│                                                                  │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │  PolicyEngine::evaluate(request, &CallHistory)          │    │
-│  │                                                         │    │
-│  │  Allow  → dispatch to tool, record ToolCall             │    │
-│  │  Block  → record PhantomEntry(Blocked), return synthetic│    │
-│  │  Phantom→ record PhantomEntry(Phantom), return synthetic│    │
-│  └─────────────────────────────────────────────────────────┘    │
-│                                                                  │
-│  CallHistory updated after every verdict (Block counts too)      │
-└────────────────────────────┬─────────────────────────────────────┘
-                             │
-                             ▼
-┌──────────────────────────────────────────────────────────────────┐
-│                    Witness Chain                                  │
-│                                                                  │
-│  BLAKE3( RFC-8785-canonical( AgentTrace                          │
-│                            + ToolCalls                           │
-│                            + PhantomEntries   ◄── 2.0            │
-│                            + policy_digest    ◄── 2.0            │
-│                            + WitnessedMetadata ) )               │
-│                                                                  │
-│  → witness_root.txt  (single hex string, independently verifiable)│
-└──────────────────────────────────────────────────────────────────┘
++------------------------------------------------------------------+
+|                          Agent Loop                              |
+|   AgentInput -> Agent::step() -> AgentOutput (tool_requests)     |
++----------------------------+-------------------------------------+
+                             |  tool_requests
+                             v
++------------------------------------------------------------------+
+|               ToolTranscript::execute()    <-- 2.0 INTERCEPT     |
+|                                                                  |
+|  +-------------------------------------------------------------+ |
+|  |  PolicyEngine::evaluate(request, &CallHistory)              | |
+|  |                                                             | |
+|  |  Allow   -> dispatch to tool, record ToolCall              | |
+|  |  Block   -> record PhantomEntry(Blocked), return synthetic | |
+|  |  Phantom -> record PhantomEntry(Phantom), return synthetic | |
+|  +-------------------------------------------------------------+ |
+|                                                                  |
+|  CallHistory updated after every verdict (Block counts too)      |
++----------------------------+-------------------------------------+
+                             |
+                             v
++------------------------------------------------------------------+
+|                    Witness Chain                                  |
+|                                                                  |
+|  BLAKE3( RFC-8785-canonical( AgentTrace                          |
+|                            + ToolCalls                           |
+|                            + PhantomEntries   <-- 2.0            |
+|                            + policy_digest    <-- 2.0            |
+|                            + WitnessedMetadata ) )               |
+|                                                                  |
+|  -> witness_root.txt  (single hex string, independently verifiable)|
++------------------------------------------------------------------+
 ```
 
 ### Key properties
@@ -63,18 +63,18 @@ COGITATOR is a direct answer to all three.
 | Property | How it is achieved |
 |---|---|
 | **Tamper-evidence** | BLAKE3 hash chain over RFC 8785 canonical JSON; any mutation changes the witness root |
-| **Deterministic replay** | Fixed seed + chaos profile + policy file → identical witness root |
-| **Pre-call interception** | `PolicyEngine::evaluate` runs *before* any tool dispatch |
+| **Deterministic replay** | Fixed seed + chaos profile + policy file produces identical witness root |
+| **Pre-call interception** | `PolicyEngine::evaluate` runs before any tool dispatch |
 | **Policy auditability** | SHA-256 digest of the policy file is committed into the witness root |
-| **Blocked-call provability** | `PhantomEntry` records every blocked/phantomed call; committed into the chain |
-| **Chaos fault injection** | Timeout / drop / corrupt / latency faults, seeded and reproducible |
+| **Blocked-call provability** | `PhantomEntry` records every blocked or phantomed call, committed into the chain |
+| **Chaos fault injection** | Timeout, drop, corrupt, and latency faults -- seeded and reproducible |
 | **Nix reproducibility** | `nix_provenance.json` captures the closed Nix store path used to build the binary |
 
 ---
 
-## v2.0 — Pre-Call Policy Interception
+## v2.0 -- Pre-Call Policy Interception
 
-v2.0 adds a **policy layer** between the agent's intent and tool execution. It is declarative, TOML-defined, and zero-config (absent = allow-all).
+v2.0 adds a policy layer between the agent's intent and tool execution. It is declarative, TOML-defined, and zero-config (absent = allow-all).
 
 ### Policy file format
 
@@ -100,15 +100,15 @@ verdict      = "phantom"
 reason       = "research tools are observe-only"
 ```
 
-Rules are evaluated top-to-bottom; the first match wins. An empty rules list (or a missing file) is equivalent to allow-all — no policy overhead for basic usage.
+Rules are evaluated top-to-bottom; the first match wins. An empty rules list (or a missing file) is equivalent to allow-all -- no policy overhead for basic usage.
 
 ### Verdicts
 
 | Verdict | Tool dispatched? | Agent sees | Witness chain |
 |---|---|---|---|
-| `allow` | ✅ Yes | Real outcome | `ToolCall` entry |
-| `block` | ❌ No | `{ blocked: true, reason: "..." }` | `PhantomEntry(Blocked)` |
-| `phantom` | ❌ No | `{ blocked: true, reason: "..." }` | `PhantomEntry(Phantom)` |
+| `allow` | Yes | Real outcome | `ToolCall` entry |
+| `block` | No | `{ blocked: true, reason: "..." }` | `PhantomEntry(Blocked)` |
+| `phantom` | No | `{ blocked: true, reason: "..." }` | `PhantomEntry(Phantom)` |
 
 ### History guards
 
@@ -134,7 +134,7 @@ The `CallHistory` is updated after every verdict (blocked calls count against th
 # Enter the reproducible dev shell (requires Nix with flakes)
 nix develop
 
-# Run CI checks (fmt → clippy → test)
+# Run CI checks (fmt -> clippy -> test)
 cargo fmt --check
 cargo clippy -- -D warnings
 cargo test
@@ -161,42 +161,41 @@ Every agent run emits a self-contained bundle:
 
 ```
 out/run_0000/
-├── agent_trace.json          # Every agent step: inputs, tool requests, outputs
-├── tool_transcript.json      # Every tool call (real + phantom) with outcomes
-├── chaos_profile.json        # Fault injection schedule (seeded, reproducible)
-├── drift_report.json         # Replay mismatch report (empty if no drift)
-├── hash_chain.txt            # Per-call BLAKE3 hashes
-├── meta.json                 # Witnessed metadata (seed, policy_digest, ...)
-├── witness_manifest.json     # Cross-file artifact hashes + bundle hash
-└── witness_root.txt          # Single hex string — the tamper-evident root
++-- agent_trace.json          # Every agent step: inputs, tool requests, outputs
++-- tool_transcript.json      # Every tool call (real + phantom) with outcomes
++-- chaos_profile.json        # Fault injection schedule (seeded, reproducible)
++-- drift_report.json         # Replay mismatch report (empty if no drift)
++-- hash_chain.txt            # Per-call BLAKE3 hashes
++-- meta.json                 # Witnessed metadata (seed, policy_digest, ...)
++-- witness_manifest.json     # Cross-file artifact hashes + bundle hash
++-- witness_root.txt          # Single hex string -- the tamper-evident root
 ```
 
 The `witness_root.txt` is the only value that needs to be published for a third party to verify the entire bundle.
 
 ---
 
-## Research & Commercialisation Context
+## Why This Matters Now
 
-### Why this matters now
+AI agents are being deployed in regulated industries -- financial services, healthcare, legal -- without any standardised mechanism for proving the agent behaved as claimed. Existing approaches (log ingestion, RAG-based audit tools, model cards) are all reconstructive: they describe what probably happened, not what provably happened.
 
-AI agents are being deployed in regulated industries (financial services, healthcare, legal) without any standardised mechanism for proving that the agent behaved as claimed. Existing approaches — log ingestion, RAG-based audit tools, model cards — are all reconstructive: they describe what *probably* happened, not what *provably* happened.
-
-COGITATOR takes the position that **agent execution should be as auditable as a compiled binary in a reproducible build system.** The witness root is the runtime equivalent of a Nix store path: a cryptographic commitment that ties a specific output to a specific, verifiable execution.
+COGITATOR takes the position that agent execution should be as auditable as a compiled binary in a reproducible build system. The witness root is the runtime equivalent of a Nix store path: a cryptographic commitment that ties a specific output to a specific, verifiable execution.
 
 ### Target applications
 
-- **Regulated AI deployment** — Financial regulators (FCA, SEC) and healthcare frameworks (EU AI Act, FDA SaMD guidance) are moving toward mandatory audit trails for high-autonomy systems. COGITATOR provides a ready technical substrate.
-- **AI red-teaming and safety evaluation** — Security researchers can use the policy layer to define capability restrictions, run an agent, and produce a tamper-evident record proving the agent attempted (or did not attempt) to circumvent them.
-- **Multi-party AI contracting** — When an AI agent acts on behalf of a client against a third-party service, both parties can independently verify the same witness root.
-- **Benchmark integrity** — Public AI benchmarks are vulnerable to cherry-picking and post-hoc result manipulation. COGITATOR's witness root makes benchmark runs independently replayable.
-- **Model-level compliance testing** — Organisations deploying frontier models can run COGITATOR as a CI gate: if the witness root for a given policy file drifts, the deployment is blocked.
+- **EU AI Act compliance** -- Articles 12 and 9 require tamper-evident record-keeping and risk management for high-risk AI systems. COGITATOR provides a ready technical substrate.
+- **Regulated AI deployment** -- Financial regulators (FCA, SEC) and healthcare frameworks (FDA SaMD guidance) are moving toward mandatory audit trails for high-autonomy systems.
+- **AI red-teaming and safety evaluation** -- Security researchers can define capability restrictions via policy, run an agent, and produce a tamper-evident record proving what the agent attempted or was blocked from attempting.
+- **Multi-party AI contracting** -- When an AI agent acts on behalf of a client against a third-party service, both parties can independently verify the same witness root.
+- **Benchmark integrity** -- Public AI benchmarks are vulnerable to cherry-picking and post-hoc result manipulation. COGITATOR's witness root makes benchmark runs independently replayable.
+- **Model-level compliance testing** -- Organisations deploying frontier models can run COGITATOR as a CI gate: if the witness root for a given policy file drifts, the deployment is blocked.
 
 ### Research directions
 
-- **Multi-agent witness composition** — Extending the hash chain model to orchestrated multi-agent runs where sub-agent witness roots are nested into a parent root.
-- **Formal policy verification** — Using the TOML policy grammar as input to a formal model checker to prove policy rules are consistent and non-bypassable.
-- **Hardware attestation integration** — Binding the witness root to a TPM attestation quote for tamper-evidence that extends from software into silicon.
-- **Differential privacy for traces** — Adding noise-injection mechanisms to agent traces that preserve witness root integrity while reducing privacy leakage from sensitive tool arguments.
+- **Multi-agent witness composition** -- Extending the hash chain model to orchestrated multi-agent runs where sub-agent witness roots are nested into a parent root.
+- **Formal policy verification** -- Using the TOML policy grammar as input to a formal model checker to prove policy rules are consistent and non-bypassable.
+- **Hardware attestation integration** -- Binding the witness root to a TPM attestation quote for tamper-evidence that extends from software into silicon.
+- **Differential privacy for traces** -- Adding noise-injection mechanisms to agent traces that preserve witness root integrity while reducing privacy leakage from sensitive tool arguments.
 
 ---
 
