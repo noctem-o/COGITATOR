@@ -22,3 +22,4 @@ paper_arxiv.zip
 
 # local paper build artifacts
 paper_final*.pdf
+.agent-trace/
