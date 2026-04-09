@@ -281,9 +281,9 @@ impl ToolTranscript {
     }
 
     /// Returns the expected entries as a record, if any are present.
-    /// Used in tests to inspect the replay baseline — not needed in production builds.
+    /// Test-only introspection helper — not needed in production builds.
     #[cfg(test)]
-    pub fn expected_record(&self) -> Option<ToolTranscriptRecord> {
+    fn expected_record(&self) -> Option<ToolTranscriptRecord> {
         if self.expected.is_empty() {
             None
         } else {
