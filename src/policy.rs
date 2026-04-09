@@ -155,7 +155,10 @@ impl PolicyEngine {
             crate::hex::encode(&h.finalize())
         };
 
-        let document: PolicyDocument = toml::from_slice(&raw)
+        let text = std::str::from_utf8(&raw)
+            .with_context(|| format!("policy file is not valid UTF-8: {}", path.display()))?;
+
+        let document: PolicyDocument = toml::from_str(text)
             .with_context(|| format!("failed to parse policy file: {}", path.display()))?;
 
         Ok(Self { document, digest })
