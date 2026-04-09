@@ -10,6 +10,15 @@
 //!
 //! The policy file path is embedded as a SHA-256 digest into `WitnessedMetadata`
 //! so the exact policy version is part of the witness root.
+//!
+//! # Normalisation
+//!
+//! Tool names are case-folded to lowercase at two boundaries:
+//!
+//! - `ToolTranscript::execute` — before policy evaluation and before recording
+//!   into `CallHistory`, so `Trade.Buy` and `trade.buy` are treated identically.
+//! - `PolicyEngine::load` — rule patterns are lowercased at parse time, so
+//!   operator typos in `policy.toml` cannot silently widen the allow surface.
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -45,9 +54,12 @@ pub enum PhantomDisposition {
 #[serde(deny_unknown_fields)]
 pub struct PolicyRule {
     pub id: String,
+    /// Glob pattern matched against the *lowercased* tool name.
     pub tool_pattern: String,
     #[serde(default)]
     pub history_tool_pattern: Option<String>,
+    /// Block once the history count reaches this value (inclusive).
+    /// A value of 2 means: allow calls 1 and 2, block call 3 onward.
     #[serde(default)]
     pub history_max_calls: Option<usize>,
     pub verdict: PolicyVerdict,
@@ -80,6 +92,7 @@ pub struct CallHistory {
 
 #[derive(Debug, Clone)]
 struct HistoryEntry {
+    /// Already lowercased at record time.
     tool_name: String,
     /// Kept for future rule types that condition on the verdict of prior calls.
     #[allow(dead_code)]
@@ -91,6 +104,7 @@ impl CallHistory {
         Self::default()
     }
 
+    /// Record a completed call.  `tool_name` must already be lowercased.
     pub fn record(&mut self, tool_name: &str, verdict: PolicyVerdict) {
         self.entries.push(HistoryEntry {
             tool_name: tool_name.to_string(),
@@ -98,6 +112,8 @@ impl CallHistory {
         });
     }
 
+    /// Count history entries whose tool name matches `pattern`.
+    /// Both the pattern and stored names are already lowercase.
     pub fn count_matching(&self, pattern: &str) -> usize {
         self.entries
             .iter()
@@ -131,8 +147,17 @@ impl PolicyEngine {
         let text = std::str::from_utf8(&raw)
             .with_context(|| format!("policy file is not valid UTF-8: {}", path.display()))?;
 
-        let document: PolicyDocument = toml::from_str(text)
+        let mut document: PolicyDocument = toml::from_str(text)
             .with_context(|| format!("failed to parse policy file: {}", path.display()))?;
+
+        // Lowercase all patterns at load time so runtime matching is always
+        // case-insensitive without paying the allocation cost per call.
+        for rule in &mut document.rules {
+            rule.tool_pattern = rule.tool_pattern.to_lowercase();
+            if let Some(ref mut p) = rule.history_tool_pattern {
+                *p = p.to_lowercase();
+            }
+        }
 
         Ok(Self { document, digest })
     }
@@ -144,6 +169,10 @@ impl PolicyEngine {
         }
     }
 
+    /// Evaluate a request against the policy.
+    ///
+    /// `request.tool_name` **must** already be lowercased by the caller
+    /// (`ToolTranscript::execute` does this at the gate).
     pub fn evaluate(
         &self,
         request: &ToolRequest,
@@ -158,7 +187,9 @@ impl PolicyEngine {
                 (&rule.history_tool_pattern, rule.history_max_calls)
             {
                 let count = history.count_matching(hist_pattern);
-                if count <= max {
+                // Block once the budget is *reached* (count >= max).
+                // Example: max = 2 → calls 1 & 2 are allowed, call 3 is blocked.
+                if count < max {
                     continue;
                 }
             }
@@ -175,6 +206,8 @@ impl PolicyEngine {
 }
 
 // ─── Glob matching ──────────────────────────────────────────────────────────
+//
+// Patterns and inputs are always lowercased before reaching these functions.
 //
 // Rules:
 //   *   matches one or more characters within a single dot-separated segment
@@ -246,8 +279,42 @@ mod tests {
 
     fn req(name: &str) -> ToolRequest {
         ToolRequest {
-            tool_name: name.to_string(),
+            tool_name: name.to_lowercase(),
             arguments: serde_json::Value::Null,
+        }
+    }
+
+    fn block_engine(pattern: &str) -> PolicyEngine {
+        PolicyEngine {
+            document: PolicyDocument {
+                schema_version: 1,
+                rules: vec![PolicyRule {
+                    id: "test-block".to_string(),
+                    tool_pattern: pattern.to_lowercase(),
+                    history_tool_pattern: None,
+                    history_max_calls: None,
+                    verdict: PolicyVerdict::Block,
+                    reason: "blocked".to_string(),
+                }],
+            },
+            digest: String::new(),
+        }
+    }
+
+    fn budget_engine(max: usize) -> PolicyEngine {
+        PolicyEngine {
+            document: PolicyDocument {
+                schema_version: 1,
+                rules: vec![PolicyRule {
+                    id: "trade-limit".to_string(),
+                    tool_pattern: "trade.*".to_string(),
+                    history_tool_pattern: Some("trade.*".to_string()),
+                    history_max_calls: Some(max),
+                    verdict: PolicyVerdict::Block,
+                    reason: "exceeded trade budget".to_string(),
+                }],
+            },
+            digest: String::new(),
         }
     }
 
@@ -262,26 +329,29 @@ mod tests {
 
     #[test]
     fn block_rule_matches_tool_pattern() {
-        let engine = PolicyEngine {
-            document: PolicyDocument {
-                schema_version: 1,
-                rules: vec![PolicyRule {
-                    id: "no-trade".to_string(),
-                    tool_pattern: "trade.*".to_string(),
-                    history_tool_pattern: None,
-                    history_max_calls: None,
-                    verdict: PolicyVerdict::Block,
-                    reason: "trading disabled".to_string(),
-                }],
-            },
-            digest: String::new(),
-        };
+        let engine = block_engine("trade.*");
         let history = CallHistory::new();
         let (verdict, rule_id, reason) = engine.evaluate(&req("trade.buy"), &history);
         assert_eq!(verdict, PolicyVerdict::Block);
-        assert_eq!(rule_id.as_deref(), Some("no-trade"));
-        assert_eq!(reason, "trading disabled");
+        assert_eq!(rule_id.as_deref(), Some("test-block"));
+        assert_eq!(reason, "blocked");
     }
+
+    // ── Case normalisation ───────────────────────────────────────────────────
+
+    #[test]
+    fn block_rule_is_case_insensitive() {
+        // Pattern is lowercase (as stored after load-time normalisation).
+        // Incoming names arrive lowercased from execute() gate.
+        let engine = block_engine("trade.*");
+        let history = CallHistory::new();
+        // req() lowercases the name, mirroring what execute() does.
+        assert_eq!(engine.evaluate(&req("Trade.Buy"), &history).0, PolicyVerdict::Block);
+        assert_eq!(engine.evaluate(&req("TRADE.BUY"), &history).0, PolicyVerdict::Block);
+        assert_eq!(engine.evaluate(&req("trade.BUY"), &history).0, PolicyVerdict::Block);
+    }
+
+    // ── Glob semantics ───────────────────────────────────────────────────────
 
     #[test]
     fn wildcard_does_not_cross_dot_boundary() {
@@ -290,34 +360,45 @@ mod tests {
         assert!(tool_name_matches("trade.**", "trade.buy.v2"));
     }
 
+    // ── Budget guard ─────────────────────────────────────────────────────────
+
     #[test]
-    fn history_guard_triggers_after_budget_exceeded() {
-        let engine = PolicyEngine {
-            document: PolicyDocument {
-                schema_version: 1,
-                rules: vec![PolicyRule {
-                    id: "trade-limit".to_string(),
-                    tool_pattern: "trade.*".to_string(),
-                    history_tool_pattern: Some("trade.*".to_string()),
-                    history_max_calls: Some(2),
-                    verdict: PolicyVerdict::Block,
-                    reason: "exceeded trade budget".to_string(),
-                }],
-            },
-            digest: String::new(),
-        };
-
+    fn history_guard_triggers_at_budget_boundary() {
+        // max = 2: allow calls 1 & 2, block call 3.
+        let engine = budget_engine(2);
         let mut history = CallHistory::new();
-        history.record("trade.buy", PolicyVerdict::Allow);
-        history.record("trade.sell", PolicyVerdict::Allow);
-        let (verdict, _, _) = engine.evaluate(&req("trade.buy"), &history);
-        assert_eq!(verdict, PolicyVerdict::Allow);
 
+        // Call 1 — allowed.
+        let (v, _, _) = engine.evaluate(&req("trade.buy"), &history);
+        assert_eq!(v, PolicyVerdict::Allow);
         history.record("trade.buy", PolicyVerdict::Allow);
-        let (verdict, rule_id, _) = engine.evaluate(&req("trade.buy"), &history);
-        assert_eq!(verdict, PolicyVerdict::Block);
+
+        // Call 2 — allowed (count = 1, 1 < 2).
+        let (v, _, _) = engine.evaluate(&req("trade.sell"), &history);
+        assert_eq!(v, PolicyVerdict::Allow);
+        history.record("trade.sell", PolicyVerdict::Allow);
+
+        // Call 3 — blocked (count = 2, 2 >= 2).
+        let (v, rule_id, _) = engine.evaluate(&req("trade.buy"), &history);
+        assert_eq!(v, PolicyVerdict::Block);
         assert_eq!(rule_id.as_deref(), Some("trade-limit"));
     }
+
+    #[test]
+    fn budget_boundary_is_exact() {
+        // max = 1: allow exactly 1 call, block the second.
+        let engine = budget_engine(1);
+        let mut history = CallHistory::new();
+
+        let (v, _, _) = engine.evaluate(&req("trade.buy"), &history);
+        assert_eq!(v, PolicyVerdict::Allow);
+        history.record("trade.buy", PolicyVerdict::Allow);
+
+        let (v, _, _) = engine.evaluate(&req("trade.buy"), &history);
+        assert_eq!(v, PolicyVerdict::Block);
+    }
+
+    // ── Phantom verdict ──────────────────────────────────────────────────────
 
     #[test]
     fn phantom_verdict_recorded() {

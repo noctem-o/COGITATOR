@@ -227,7 +227,19 @@ impl ToolTranscript {
         &self.phantom_recorded
     }
 
+    /// Primary agent-facing dispatch gate.
+    ///
+    /// The tool name is lowercased here — this is the single normalisation
+    /// point for all incoming requests.  Policy evaluation and history
+    /// recording both see the normalised name, so case variants of the same
+    /// tool are treated identically throughout the system.
     pub fn execute(&mut self, step: u32, request: ToolRequest) -> ToolResponse {
+        // Normalise at the gate.  Everything downstream sees lowercase.
+        let request = ToolRequest {
+            tool_name: request.tool_name.to_lowercase(),
+            arguments: request.arguments,
+        };
+
         let tool_call_idx = self.next_call_idx;
         self.next_call_idx = self.next_call_idx.saturating_add(1);
 
@@ -278,12 +290,25 @@ impl ToolTranscript {
         }
     }
 
+    /// Ordeal / replay path — policy is intentionally bypassed here.
+    ///
+    /// Replays reconstruct what *happened*; they do not re-adjudicate it.
+    /// This method must only be called when the transcript is in `Replay`
+    /// mode or when the caller is an ordeal harness that manages its own
+    /// execution contract.  A `debug_assert` enforces this in dev/test
+    /// builds so accidental Live callers are caught immediately.
     pub fn execute_with_response(
         &mut self,
         step: u32,
         request: ToolRequest,
         response: ToolResponse,
     ) -> ToolResponse {
+        debug_assert!(
+            matches!(self.mode, ToolMode::Replay),
+            "execute_with_response bypasses policy and must only be called in Replay mode; \
+             use execute() for Live agent dispatch"
+        );
+
         let tool_call_idx = self.next_call_idx;
         self.next_call_idx = self.next_call_idx.saturating_add(1);
         self.history.record(&request.tool_name, PolicyVerdict::Allow);
