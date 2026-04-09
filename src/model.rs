@@ -89,6 +89,25 @@ pub struct WitnessedMetadata {
     pub policy_digest: Option<String>,
 }
 
+impl Default for WitnessedMetadata {
+    fn default() -> Self {
+        Self {
+            schema_version: TRACE_SCHEMA_VERSION,
+            seed: 0,
+            requested_runs: 1,
+            executed_runs: 1,
+            parallel: false,
+            parallel_strategy: "sequential".to_string(),
+            case_filter: None,
+            entropy_sources: Vec::new(),
+            total_rng_calls: 0,
+            chaos_profile: None,
+            pass_threshold: None,
+            policy_digest: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProvenanceMetadata {

@@ -83,11 +83,9 @@ proptest! {
                     executed_runs: runs,
                     parallel: true,
                     parallel_strategy: "rayon/ordered-run-ids".to_string(),
-                    case_filter: None,
                     entropy_sources: vec!["rng:StdRng(seed)".to_string()],
                     total_rng_calls: output.total_rng_calls,
-                    chaos_profile: None,
-                    pass_threshold: None,
+                    ..Default::default()
                 };
                 witness_root_for_trace(&metadata, &output.trace)
             })
@@ -140,7 +138,7 @@ proptest! {
                 schedule_version: CHAOS_SCHEDULE_VERSION,
                 rates,
             }),
-            pass_threshold: None,
+            ..Default::default()
         };
 
         let mut agent_trace = Vec::new();
@@ -219,6 +217,7 @@ proptest! {
                 outcome: outcome.clone(),
                 fault: None,
             }],
+            ..Default::default()
         };
 
         let actual = ToolTranscriptRecord {
@@ -232,6 +231,7 @@ proptest! {
                 outcome,
                 fault: None,
             }],
+            ..Default::default()
         };
 
         let report = drift::detect_transcript_drift(&expected, &actual);
@@ -246,17 +246,12 @@ proptest! {
 #[test]
 fn witness_root_sorts_tool_calls_by_index() {
     let metadata = WitnessedMetadata {
-        schema_version: TRACE_SCHEMA_VERSION,
         seed: 7,
         requested_runs: 1,
         executed_runs: 1,
         parallel: false,
         parallel_strategy: "sequential".to_string(),
-        case_filter: None,
-        entropy_sources: vec![],
-        total_rng_calls: 0,
-        chaos_profile: None,
-        pass_threshold: None,
+        ..Default::default()
     };
 
     let agent_trace = vec![AgentTraceEntry {
@@ -308,7 +303,6 @@ fn witness_root_sorts_tool_calls_by_index() {
 fn llm_stub_record_replay_deterministic() {
     let seed = 7u64;
     let metadata = WitnessedMetadata {
-        schema_version: TRACE_SCHEMA_VERSION,
         seed,
         requested_runs: 1,
         executed_runs: 1,
@@ -319,9 +313,7 @@ fn llm_stub_record_replay_deterministic() {
             "rng:StdRng(seed)".to_string(),
             "tooling:stubbed-or-replay".to_string(),
         ],
-        total_rng_calls: 0,
-        chaos_profile: None,
-        pass_threshold: None,
+        ..Default::default()
     };
 
     let agent_trace = llm_agent_trace(seed);
@@ -354,7 +346,6 @@ fn llm_stub_record_replay_deterministic() {
 fn llm_stub_thread_invariance() {
     let seed = 9u64;
     let metadata = WitnessedMetadata {
-        schema_version: TRACE_SCHEMA_VERSION,
         seed,
         requested_runs: 1,
         executed_runs: 1,
@@ -365,9 +356,7 @@ fn llm_stub_thread_invariance() {
             "rng:StdRng(seed)".to_string(),
             "tooling:stubbed-or-replay".to_string(),
         ],
-        total_rng_calls: 0,
-        chaos_profile: None,
-        pass_threshold: None,
+        ..Default::default()
     };
 
     let roots: Vec<String> = [1usize, 4]
@@ -441,20 +430,16 @@ fn agent_witness_root_invariant_across_thread_counts() {
                 .unwrap()
                 .install(|| {
                     let metadata = WitnessedMetadata {
-                        schema_version: TRACE_SCHEMA_VERSION,
                         seed: 13,
                         requested_runs: 1,
                         executed_runs: 1,
                         parallel: false,
                         parallel_strategy: "sequential".to_string(),
-                        case_filter: None,
                         entropy_sources: vec![
                             "rng:StdRng(seed)".to_string(),
                             "tooling:stubbed-or-replay".to_string(),
                         ],
-                        total_rng_calls: 0,
-                        chaos_profile: None,
-                        pass_threshold: None,
+                        ..Default::default()
                     };
 
                     let mut agent = cogitator::agent::ClawdbotAgent::new(
@@ -496,17 +481,13 @@ fn agent_witness_root_invariant_across_thread_counts() {
 #[test]
 fn witness_root_changes_on_semantic_output_change() {
     let metadata = WitnessedMetadata {
-        schema_version: TRACE_SCHEMA_VERSION,
         seed: 3,
         requested_runs: 1,
         executed_runs: 1,
         parallel: false,
         parallel_strategy: "sequential".to_string(),
         case_filter: Some(0),
-        entropy_sources: vec![],
-        total_rng_calls: 0,
-        chaos_profile: None,
-        pass_threshold: None,
+        ..Default::default()
     };
     let agent_trace = vec![AgentTraceEntry {
         step: 0,
@@ -545,17 +526,13 @@ fn witness_root_changes_on_semantic_output_change() {
 #[test]
 fn witness_root_ignores_simulated_latency() {
     let metadata = WitnessedMetadata {
-        schema_version: TRACE_SCHEMA_VERSION,
         seed: 1,
         requested_runs: 1,
         executed_runs: 1,
         parallel: false,
         parallel_strategy: "sequential".to_string(),
         case_filter: Some(0),
-        entropy_sources: vec![],
-        total_rng_calls: 0,
-        chaos_profile: None,
-        pass_threshold: None,
+        ..Default::default()
     };
 
     let agent_trace = vec![AgentTraceEntry {
@@ -595,17 +572,13 @@ fn witness_root_ignores_simulated_latency() {
 #[test]
 fn witness_root_ignores_fault_metadata_shape_details() {
     let metadata = WitnessedMetadata {
-        schema_version: TRACE_SCHEMA_VERSION,
         seed: 2,
         requested_runs: 1,
         executed_runs: 1,
         parallel: false,
         parallel_strategy: "sequential".to_string(),
         case_filter: Some(0),
-        entropy_sources: vec![],
-        total_rng_calls: 0,
-        chaos_profile: None,
-        pass_threshold: None,
+        ..Default::default()
     };
     let agent_trace = vec![AgentTraceEntry {
         step: 0,
