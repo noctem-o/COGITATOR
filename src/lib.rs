@@ -3,12 +3,13 @@ pub mod canonical_json;
 pub mod chaos;
 pub mod drift;
 pub mod eval;
-pub mod hex; // NEW: Centralized hex encoding utilities
+pub mod hex;
 pub mod io_utils;
 pub mod llm;
 pub mod model;
 pub mod nix_provenance;
 pub mod ordeal;
+pub mod policy;
 pub mod report;
 pub mod strict_json;
 pub mod tooling;
