@@ -27,6 +27,7 @@ mod llm;
 mod model;
 mod nix_provenance;
 mod ordeal;
+mod policy;
 mod report;
 mod strict_json;
 mod tooling;
@@ -267,6 +268,17 @@ pub struct RunArgs {
         help = "Agent/replay only; stored as canonical string in witness metadata for ordeal runs"
     )]
     pub pass_threshold: Option<String>,
+
+    /// Path to a TOML policy file for pre-call tool interception.
+    /// If the file does not exist, an allow-all policy is used (no enforcement).
+    /// The SHA-256 digest of the file is committed into the witness root.
+    #[arg(
+        long,
+        requires = "agent_mode",
+        default_value = "policy.toml",
+        help = "Agent/replay only; path to policy.toml (allow-all if absent)"
+    )]
+    pub policy: PathBuf,
 
     #[arg(
         long,
@@ -693,6 +705,26 @@ fn run_agent(args: RunArgs) -> Result<()> {
         anyhow::bail!("--threads must be at least 1");
     }
 
+    // Load policy engine once before entering the thread pool.
+    // allow-all if the file is absent — zero config required.
+    let policy_engine = policy::PolicyEngine::load(&args.policy)
+        .with_context(|| format!("failed to load policy from {}", args.policy.display()))?;
+    let policy_digest = if policy_engine.digest.is_empty() {
+        None
+    } else {
+        Some(policy_engine.digest.clone())
+    };
+    // Log whether a policy is active so operators can tell at a glance.
+    if policy_digest.is_some() {
+        println!(
+            "Policy: loaded {} (digest: {})",
+            args.policy.display(),
+            policy_engine.digest
+        );
+    } else {
+        println!("Policy: allow-all (no policy.toml found at {})", args.policy.display());
+    }
+
     let run_ids: Vec<u32> = match args.case {
         Some(case_id) => vec![case_id],
         None => (0..args.runs).collect(),
@@ -770,6 +802,7 @@ fn run_agent(args: RunArgs) -> Result<()> {
                 chaos_profile.clone(),
                 nix_provenance.clone(),
                 pass_threshold_witnessed.clone(),
+                policy_digest.clone(),
             );
             let meta_path = run_dir.join("meta.json");
             canonical_json::write_json(&meta_path, &metadata, "meta.json")?;
@@ -793,10 +826,14 @@ fn run_agent(args: RunArgs) -> Result<()> {
                 None
             };
 
+            // Build the transcript and attach the policy engine.
+            // Replay mode skips policy re-evaluation (correct: replays reconstruct
+            // what happened, they do not re-adjudicate it).
             let mut tool_transcript = if let Some((_, transcript, _)) = replay_bundle.as_ref() {
                 tooling::ToolTranscript::new_replay(transcript.clone())
             } else {
                 tooling::ToolTranscript::new_live(chaos_engine)
+                    .with_policy(policy::PolicyEngine::load(&args.policy)?)
             };
 
             let mut agent_trace = Vec::new();
@@ -1092,6 +1129,8 @@ fn ordeal_check_cmd(args: OrdealCheckArgs) -> Result<()> {
         llm_model: Some("stub".to_string()),
         llm_seed: None,
         pass_threshold: Some("0.5".to_string()),
+        // ordeal check uses no policy — allow-all ensures the golden is stable.
+        policy: PathBuf::from("nonexistent_policy_for_ordeal_check.toml"),
         nix_provenance: nix_provenance::NixProvenanceMode::Off,
     };
 
@@ -1102,9 +1141,7 @@ fn ordeal_check_cmd(args: OrdealCheckArgs) -> Result<()> {
         io_utils::write_atomic_string(
             &args.golden,
             "ordeal golden witness root",
-            &(actual.clone()
-                + "
-"),
+            &(actual.clone() + "\n"),
         )?;
         println!("Updated golden {} with {}", args.golden.display(), actual);
         return Ok(());
@@ -1204,6 +1241,7 @@ fn build_metadata(
             total_rng_calls,
             chaos_profile: None,
             pass_threshold: None,
+            policy_digest: None,
         },
         provenance: model::ProvenanceMetadata {
             created_at,
@@ -1226,6 +1264,7 @@ fn build_agent_metadata(
     chaos_profile: chaos::ChaosProfile,
     nix_provenance: Option<model::NixProvenance>,
     pass_threshold: Option<String>,
+    policy_digest: Option<String>,
 ) -> model::RunMetadata {
     let created_at = resolve_created_at(args);
     let git_rev = git_rev();
@@ -1269,6 +1308,7 @@ fn build_agent_metadata(
                 rates: chaos_profile.rates.clone(),
             }),
             pass_threshold,
+            policy_digest,
         },
         provenance: model::ProvenanceMetadata {
             created_at,
@@ -1375,10 +1415,12 @@ fn run_demo_agent(
             llm_model: Some("stub".to_string()),
             llm_seed: None,
             pass_threshold: Some("0.5".to_string()),
+            policy: PathBuf::from("nonexistent_policy_for_demo.toml"),
             nix_provenance: nix_provenance::NixProvenanceMode::Off,
         },
         0,
         chaos_profile.clone(),
+        None,
         None,
         None,
     );
