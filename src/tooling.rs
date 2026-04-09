@@ -279,21 +279,6 @@ impl ToolTranscript {
             entries: self.recorded,
         }
     }
-
-    /// Returns the expected entries as a record, if any are present.
-    /// Test-only introspection helper — not needed in production builds.
-    #[cfg(test)]
-    fn expected_record(&self) -> Option<ToolTranscriptRecord> {
-        if self.expected.is_empty() {
-            None
-        } else {
-            Some(ToolTranscriptRecord {
-                schema_version: TOOL_TRANSCRIPT_SCHEMA_VERSION,
-                mode: ToolMode::Replay,
-                entries: self.expected.clone(),
-            })
-        }
-    }
 }
 
 pub fn read_transcript(path: &Path) -> Result<ToolTranscriptRecord> {
