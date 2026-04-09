@@ -7,9 +7,12 @@ use crate::canonical_json;
 use crate::chaos::{apply_fault, ChaosEngine, FaultKind, FaultRecord};
 use crate::llm;
 use crate::llm::LlmBackend;
+use crate::policy::{CallHistory, PhantomDisposition, PolicyEngine, PolicyVerdict};
 use crate::report::DriftIssue;
 
-pub const TOOL_TRANSCRIPT_SCHEMA_VERSION: u32 = 3;
+pub const TOOL_TRANSCRIPT_SCHEMA_VERSION: u32 = 4;
+
+// ─── Request / Response ─────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -27,6 +30,8 @@ pub struct ToolResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub simulated_latency_ms: Option<u64>,
 }
+
+// ─── Outcome / Error ────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -71,6 +76,34 @@ pub enum ToolOutcome {
     },
 }
 
+// ─── Phantom entries ─────────────────────────────────────────────────────────
+//
+// A PhantomEntry records a tool call that was intercepted by the policy engine
+// before dispatch.  It is committed into the witness chain alongside real
+// ToolCalls so that blocked / phantomed actions are cryptographically provable.
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PhantomEntry {
+    /// Agent step at which the call was attempted.
+    pub step: u32,
+    /// Index within the step (matches tool_call_idx in ToolCall).
+    pub tool_call_idx: u32,
+    /// The tool that was requested.
+    pub tool_name: String,
+    /// The arguments as supplied by the agent.
+    pub request: serde_json::Value,
+    /// Why it was intercepted.
+    pub disposition: PhantomDisposition,
+    /// The policy rule id that triggered (if any).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rule_id: Option<String>,
+    /// Human-readable reason from the policy rule.
+    pub reason: String,
+}
+
+// ─── Fault transcript ────────────────────────────────────────────────────────
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TranscriptFault {
@@ -92,6 +125,8 @@ pub enum TranscriptFault {
     },
 }
 
+// ─── ToolCall (executed) ─────────────────────────────────────────────────────
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct ToolCall {
@@ -104,6 +139,8 @@ pub struct ToolCall {
     pub fault: Option<TranscriptFault>,
 }
 
+// ─── Mode ────────────────────────────────────────────────────────────────────
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolMode {
@@ -111,22 +148,37 @@ pub enum ToolMode {
     Replay,
 }
 
+// ─── Transcript record ───────────────────────────────────────────────────────
+
+/// The serialised form of a completed transcript.
+/// `entries` are real (executed) calls; `phantom_entries` are intercepted calls.
+/// Both are committed into the witness chain.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct ToolTranscriptRecord {
     pub schema_version: u32,
     pub mode: ToolMode,
     pub entries: Vec<ToolCall>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub phantom_entries: Vec<PhantomEntry>,
+    /// SHA-256 digest of the policy file used, or empty if no policy was loaded.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub policy_digest: String,
 }
+
+// ─── Live transcript ─────────────────────────────────────────────────────────
 
 pub struct ToolTranscript {
     mode: ToolMode,
     expected: Vec<ToolCall>,
     recorded: Vec<ToolCall>,
+    phantom_recorded: Vec<PhantomEntry>,
     cursor: usize,
     mismatches: Vec<DriftIssue>,
     chaos: Option<ChaosEngine>,
     next_call_idx: u32,
+    policy: PolicyEngine,
+    history: CallHistory,
 }
 
 impl ToolTranscript {
@@ -135,10 +187,13 @@ impl ToolTranscript {
             mode: ToolMode::Live,
             expected: Vec::new(),
             recorded: Vec::new(),
+            phantom_recorded: Vec::new(),
             cursor: 0,
             mismatches: Vec::new(),
             chaos,
             next_call_idx: 0,
+            policy: PolicyEngine::allow_all(),
+            history: CallHistory::new(),
         }
     }
 
@@ -147,15 +202,24 @@ impl ToolTranscript {
             mode: ToolMode::Replay,
             expected: expected.entries,
             recorded: Vec::new(),
+            phantom_recorded: Vec::new(),
             cursor: 0,
             mismatches: Vec::new(),
             chaos: None,
             next_call_idx: 0,
+            policy: PolicyEngine::allow_all(),
+            history: CallHistory::new(),
         }
     }
 
-    /// Returns the current execution mode. Called by ordeal.rs at runtime to
-    /// assert Live vs Replay — must not be gated behind #[cfg(test)].
+    /// Attach a loaded `PolicyEngine` to this transcript.
+    /// Must be called before any `execute` calls if policy enforcement is desired.
+    pub fn with_policy(mut self, policy: PolicyEngine) -> Self {
+        self.policy = policy;
+        self
+    }
+
+    /// Returns the current execution mode. Called by ordeal.rs at runtime.
     pub fn mode(&self) -> ToolMode {
         self.mode.clone()
     }
@@ -164,16 +228,78 @@ impl ToolTranscript {
         &self.mismatches
     }
 
-    pub fn execute(&mut self, step: u32, request: ToolRequest) -> ToolResponse {
-        let response = if request.tool_name == llm::LlmRequest::tool_name() {
-            llm_live_response(&request).unwrap_or_else(|| stub_response(&request))
-        } else {
-            stub_response(&request)
-        };
-
-        self.execute_with_response(step, request, response)
+    /// Returns a reference to all phantom entries recorded so far.
+    pub fn phantom_entries(&self) -> &[PhantomEntry] {
+        &self.phantom_recorded
     }
 
+    // ─── Pre-call intercept ───────────────────────────────────────────────────
+    //
+    // This is the heart of 2.0.  Before any tool call reaches dispatch, we:
+    //   1. Evaluate it against the policy engine (with full call history)
+    //   2. If Block or Phantom: record a PhantomEntry and return a synthetic
+    //      blocked response to the agent.  No side-effect occurs.
+    //   3. If Allow: proceed to execute_with_response as normal.
+    //   4. Record the outcome in CallHistory regardless of verdict.
+
+    pub fn execute(&mut self, step: u32, request: ToolRequest) -> ToolResponse {
+        let tool_call_idx = self.next_call_idx;
+        self.next_call_idx = self.next_call_idx.saturating_add(1);
+
+        // ── Policy evaluation (pre-call observation) ──────────────────────────
+        let (verdict, rule_id, reason) = self.policy.evaluate(&request, &self.history);
+
+        match verdict {
+            PolicyVerdict::Block | PolicyVerdict::Phantom => {
+                let disposition = if verdict == PolicyVerdict::Block {
+                    PhantomDisposition::Blocked
+                } else {
+                    PhantomDisposition::Phantom
+                };
+
+                // Record the phantom entry — committed into the witness chain.
+                self.phantom_recorded.push(PhantomEntry {
+                    step,
+                    tool_call_idx,
+                    tool_name: request.tool_name.clone(),
+                    request: request.arguments.clone(),
+                    disposition,
+                    rule_id,
+                    reason: reason.clone(),
+                });
+
+                // Update history so subsequent rules can reason about this attempt.
+                self.history.record(&request.tool_name, verdict);
+
+                // Return a synthetic blocked response to the agent.
+                ToolResponse {
+                    tool_name: request.tool_name,
+                    output: serde_json::json!({
+                        "blocked": true,
+                        "reason": reason,
+                    }),
+                    success: false,
+                    simulated_latency_ms: None,
+                }
+            }
+
+            PolicyVerdict::Allow => {
+                // Record the allow in history before dispatch.
+                self.history.record(&request.tool_name, PolicyVerdict::Allow);
+
+                let response = if request.tool_name == llm::LlmRequest::tool_name() {
+                    llm_live_response(&request).unwrap_or_else(|| stub_response(&request))
+                } else {
+                    stub_response(&request)
+                };
+
+                self.execute_with_response_inner(step, tool_call_idx, request, response)
+            }
+        }
+    }
+
+    /// Execute with an explicit response (used for replay and testing).
+    /// Does NOT re-run policy evaluation — callers that need policy must use `execute`.
     pub fn execute_with_response(
         &mut self,
         step: u32,
@@ -182,7 +308,17 @@ impl ToolTranscript {
     ) -> ToolResponse {
         let tool_call_idx = self.next_call_idx;
         self.next_call_idx = self.next_call_idx.saturating_add(1);
+        self.history.record(&request.tool_name, PolicyVerdict::Allow);
+        self.execute_with_response_inner(step, tool_call_idx, request, response)
+    }
 
+    fn execute_with_response_inner(
+        &mut self,
+        step: u32,
+        tool_call_idx: u32,
+        request: ToolRequest,
+        response: ToolResponse,
+    ) -> ToolResponse {
         match self.mode {
             ToolMode::Live => {
                 let mut response = response;
@@ -277,9 +413,13 @@ impl ToolTranscript {
             schema_version: TOOL_TRANSCRIPT_SCHEMA_VERSION,
             mode: self.mode,
             entries: self.recorded,
+            phantom_entries: self.phantom_recorded,
+            policy_digest: self.policy.digest,
         }
     }
 }
+
+// ─── I/O ────────────────────────────────────────────────────────────────────
 
 pub fn read_transcript(path: &Path) -> Result<ToolTranscriptRecord> {
     let file = std::fs::File::open(path).with_context(|| "failed to open tool transcript")?;
@@ -292,6 +432,8 @@ pub fn write_transcript(path: &Path, record: &ToolTranscriptRecord) -> Result<()
     canonical_json::write_json(path, record, "tool transcript")?;
     Ok(())
 }
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 fn outcome_from_response(response: &ToolResponse, fault: Option<&FaultRecord>) -> ToolOutcome {
     if response.success {

@@ -83,6 +83,10 @@ pub struct WitnessedMetadata {
     pub total_rng_calls: u64,
     pub chaos_profile: Option<ChaosProfileSummary>,
     pub pass_threshold: Option<String>,
+    /// SHA-256 digest of the policy file in effect, or None if no policy was loaded.
+    /// Committed into the witness root so the exact policy version is provable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_digest: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

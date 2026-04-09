@@ -1,0 +1,49 @@
+# COGITATOR policy file
+# Evaluated before every tool call. Rules are matched top-to-bottom; first match wins.
+# If this file is absent, all calls are allowed (allow-all default).
+#
+# schema_version must be 1.
+
+schema_version = 1
+
+# ─── Example rules ────────────────────────────────────────────────────────────
+#
+# Uncomment and adapt as needed.
+
+# Block all trade execution calls outright.
+# [[rules]]
+# id          = "no-trade-execute"
+# tool_pattern = "trade.execute"
+# verdict     = "block"
+# reason      = "Trade execution is not permitted in this evaluation environment."
+
+# Phantom-observe research tool calls (agent sees a blocked response, action is
+# recorded cryptographically but nothing is executed).
+# [[rules]]
+# id          = "phantom-research"
+# tool_pattern = "research.**"
+# verdict     = "phantom"
+# reason      = "Research tools are observation-only in this environment."
+
+# Block further trade calls once the agent has already made more than 3 this run.
+# [[rules]]
+# id                   = "trade-budget"
+# tool_pattern         = "trade.*"
+# history_tool_pattern = "trade.*"
+# history_max_calls    = 3
+# verdict              = "block"
+# reason               = "Agent has exceeded the per-run trade call budget."
+
+# ─── Finance plugin rules (uncomment when finance plugins are active) ──────────
+
+# [[rules]]
+# id          = "no-live-orders"
+# tool_pattern = "finance.order.*"
+# verdict     = "block"
+# reason      = "Live order submission is disabled. Use finance.order.simulate instead."
+
+# [[rules]]
+# id          = "no-withdrawal"
+# tool_pattern = "finance.account.withdraw"
+# verdict     = "block"
+# reason      = "Withdrawal calls are unconditionally blocked in evaluation runs."
