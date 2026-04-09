@@ -277,7 +277,8 @@ impl ToolTranscript {
             }
 
             PolicyVerdict::Allow => {
-                self.history.record(&request.tool_name, PolicyVerdict::Allow);
+                self.history
+                    .record(&request.tool_name, PolicyVerdict::Allow);
 
                 let response = if request.tool_name == llm::LlmRequest::tool_name() {
                     llm_live_response(&request).unwrap_or_else(|| stub_response(&request))
@@ -290,28 +291,25 @@ impl ToolTranscript {
         }
     }
 
-    /// Ordeal / replay path — policy is intentionally bypassed here.
+    /// Caller-supplied response path — policy is intentionally bypassed.
     ///
-    /// Replays reconstruct what *happened*; they do not re-adjudicate it.
-    /// This method must only be called when the transcript is in `Replay`
-    /// mode or when the caller is an ordeal harness that manages its own
-    /// execution contract.  A `debug_assert` enforces this in dev/test
-    /// builds so accidental Live callers are caught immediately.
+    /// Used by the ordeal/replay harness which constructs the response itself
+    /// (replay: read from baseline record; ordeal: synthetic stub with known
+    /// inputs).  The caller takes responsibility for the response content;
+    /// this method only records the call and applies chaos / drift checks.
+    ///
+    /// **Do not use this from a normal Live agent path** — use `execute()`
+    /// instead so the policy gate and history recording fire correctly.
     pub fn execute_with_response(
         &mut self,
         step: u32,
         request: ToolRequest,
         response: ToolResponse,
     ) -> ToolResponse {
-        debug_assert!(
-            matches!(self.mode, ToolMode::Replay),
-            "execute_with_response bypasses policy and must only be called in Replay mode; \
-             use execute() for Live agent dispatch"
-        );
-
         let tool_call_idx = self.next_call_idx;
         self.next_call_idx = self.next_call_idx.saturating_add(1);
-        self.history.record(&request.tool_name, PolicyVerdict::Allow);
+        self.history
+            .record(&request.tool_name, PolicyVerdict::Allow);
         self.execute_with_response_inner(step, tool_call_idx, request, response)
     }
 

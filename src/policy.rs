@@ -6,7 +6,7 @@
 //! - `Allow`   — execute normally, record as a real `ToolCall`
 //! - `Block`   — do not execute; record as a `PhantomEntry` with `blocked` disposition
 //! - `Phantom` — do not execute; record as a `PhantomEntry` with `phantom` disposition
-//!               (semantically: the agent tried, the harness observed, no side-effect)
+//!   (semantically: the agent tried, the harness observed, no side-effect)
 //!
 //! The policy file path is embedded as a SHA-256 digest into `WitnessedMetadata`
 //! so the exact policy version is part of the witness root.
@@ -249,15 +249,15 @@ fn glob_match(pattern: &str, input: &str) -> bool {
         if pi + 1 < pat.len() && pc == '*' && pat[pi + 1] == '*' {
             // ** — greedy wildcard, crosses dots. Try matching zero chars
             // (skip **) or consume one input char and stay on **.
-            stack.push((pi + 2, ii));              // skip ** entirely
+            stack.push((pi + 2, ii)); // skip ** entirely
             if ii < inp.len() {
-                stack.push((pi, ii + 1));          // consume one char, stay on **
+                stack.push((pi, ii + 1)); // consume one char, stay on **
             }
         } else if pc == '*' {
             // Single * — matches any char except '.'
-            stack.push((pi + 1, ii));              // skip * (match zero chars)
+            stack.push((pi + 1, ii)); // skip * (match zero chars)
             if ii < inp.len() && inp[ii] != '.' {
-                stack.push((pi, ii + 1));          // consume one non-dot char, stay on *
+                stack.push((pi, ii + 1)); // consume one non-dot char, stay on *
             }
         } else {
             // Literal character match
@@ -346,9 +346,18 @@ mod tests {
         let engine = block_engine("trade.*");
         let history = CallHistory::new();
         // req() lowercases the name, mirroring what execute() does.
-        assert_eq!(engine.evaluate(&req("Trade.Buy"), &history).0, PolicyVerdict::Block);
-        assert_eq!(engine.evaluate(&req("TRADE.BUY"), &history).0, PolicyVerdict::Block);
-        assert_eq!(engine.evaluate(&req("trade.BUY"), &history).0, PolicyVerdict::Block);
+        assert_eq!(
+            engine.evaluate(&req("Trade.Buy"), &history).0,
+            PolicyVerdict::Block
+        );
+        assert_eq!(
+            engine.evaluate(&req("TRADE.BUY"), &history).0,
+            PolicyVerdict::Block
+        );
+        assert_eq!(
+            engine.evaluate(&req("trade.BUY"), &history).0,
+            PolicyVerdict::Block
+        );
     }
 
     // ── Glob semantics ───────────────────────────────────────────────────────
