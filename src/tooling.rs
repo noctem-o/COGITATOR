@@ -154,8 +154,8 @@ impl ToolTranscript {
         }
     }
 
-    /// Returns the current execution mode. Used in tests to assert Live vs Replay.
-    #[cfg(test)]
+    /// Returns the current execution mode. Called by ordeal.rs at runtime to
+    /// assert Live vs Replay — must not be gated behind #[cfg(test)].
     pub fn mode(&self) -> ToolMode {
         self.mode.clone()
     }
@@ -281,7 +281,7 @@ impl ToolTranscript {
     }
 
     /// Returns the expected entries as a record, if any are present.
-    /// Used in tests to inspect the replay baseline.
+    /// Used in tests to inspect the replay baseline — not needed in production builds.
     #[cfg(test)]
     pub fn expected_record(&self) -> Option<ToolTranscriptRecord> {
         if self.expected.is_empty() {
