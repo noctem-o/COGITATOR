@@ -53,3 +53,30 @@ pub enum DriftIssue {
         actual: String,
     },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::DriftIssue;
+
+    #[test]
+    fn drift_issue_serializes_with_kind_tag_and_fields() {
+        let issue = DriftIssue::ToolStepMismatch {
+            index: 3,
+            expected: 10,
+            actual: 11,
+        };
+        let value = serde_json::to_value(&issue).expect("serialize");
+        assert_eq!(value["kind"], "tool_step_mismatch");
+        assert_eq!(value["index"], 3);
+        assert_eq!(value["expected"], 10);
+        assert_eq!(value["actual"], 11);
+    }
+
+    #[test]
+    fn tool_outcome_variant_uses_legacy_schema_kind_name() {
+        let issue = DriftIssue::ToolOutcomeMismatch { index: 7 };
+        let value = serde_json::to_value(&issue).expect("serialize");
+        assert_eq!(value["kind"], "tool_response_hash_mismatch");
+        assert_eq!(value["index"], 7);
+    }
+}
