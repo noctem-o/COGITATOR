@@ -55,6 +55,14 @@ fn hint_for_line(trimmed: &str) -> Option<&'static str> {
     None
 }
 
+fn resolve_manifest_artifact_path(witness_dir: &Path, raw: &str) -> std::path::PathBuf {
+    let path = std::path::PathBuf::from(raw);
+    if path.is_absolute() || path.exists() {
+        return path;
+    }
+    witness_dir.join(path)
+}
+
 pub fn verify(meta_path: &Path, trace_path: &Path, expect: &str) -> Result<String> {
     let expect = expect.trim();
 
@@ -155,9 +163,10 @@ pub fn recompute_agent_witness_root_from_bundle(
     let manifest: WitnessManifest =
         crate::strict_json::from_path(&manifest_path, "witness_manifest.json")?;
 
-    let meta_path = witness_dir.join(&manifest.meta_json);
-    let trace_path = witness_dir.join(&manifest.agent_trace_json);
-    let transcript_path = witness_dir.join(&manifest.tool_transcript_json);
+    let meta_path = resolve_manifest_artifact_path(witness_dir, &manifest.meta_json);
+    let trace_path = resolve_manifest_artifact_path(witness_dir, &manifest.agent_trace_json);
+    let transcript_path =
+        resolve_manifest_artifact_path(witness_dir, &manifest.tool_transcript_json);
 
     let metadata: RunMetadata = crate::strict_json::from_path(&meta_path, "meta.json")?;
 
@@ -170,7 +179,7 @@ pub fn recompute_agent_witness_root_from_bundle(
     let expected = if let Some(expect) = expect_override {
         expect.trim().to_string()
     } else if let Some(path) = manifest.witness_root_txt.as_ref() {
-        let root_path = witness_dir.join(path);
+        let root_path = resolve_manifest_artifact_path(witness_dir, path);
         std::fs::read_to_string(&root_path)
             .with_context(|| format!("failed to read {}", root_path.display()))?
             .trim()
