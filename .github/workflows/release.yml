@@ -29,15 +29,28 @@ jobs:
           cargo install cargo-dist --locked --version "${CARGO_DIST_VERSION}"
 
       - name: Verify cargo-dist version
-        run: cargo dist --version | grep -F "cargo-dist ${CARGO_DIST_VERSION}"
+        run: |
+          if cargo dist --version > /tmp/cargo-dist-version.txt 2>/dev/null; then
+            echo "DIST_CMD=cargo dist" >> "$GITHUB_ENV"
+          elif command -v cargo-dist >/dev/null 2>&1; then
+            cargo-dist --version > /tmp/cargo-dist-version.txt
+            echo "DIST_CMD=cargo-dist" >> "$GITHUB_ENV"
+          elif command -v dist >/dev/null 2>&1; then
+            dist --version > /tmp/cargo-dist-version.txt
+            echo "DIST_CMD=dist" >> "$GITHUB_ENV"
+          else
+            echo "cargo-dist executable not found"
+            exit 1
+          fi
+          grep -F "cargo-dist ${CARGO_DIST_VERSION}" /tmp/cargo-dist-version.txt
 
       - name: Build release artifacts
-        run: cargo dist build --artifacts=global
+        run: ${DIST_CMD} build --artifacts=global
 
       - name: Publish GitHub release and upload artifacts
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: cargo dist host --steps=upload
+        run: ${DIST_CMD} host --steps=upload
 
       - name: Attest release build provenance
         uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0

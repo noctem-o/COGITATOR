@@ -2,6 +2,7 @@ name: CI
 
 permissions:
   contents: read
+  checks: write
 
 env:
   CARGO_DIST_VERSION: 0.28.0
@@ -76,10 +77,23 @@ jobs:
           cargo install cargo-dist --locked --version "${CARGO_DIST_VERSION}"
 
       - name: Verify cargo-dist version
-        run: cargo dist --version | grep -F "cargo-dist ${CARGO_DIST_VERSION}"
+        run: |
+          if cargo dist --version > /tmp/cargo-dist-version.txt 2>/dev/null; then
+            echo "DIST_CMD=cargo dist" >> "$GITHUB_ENV"
+          elif command -v cargo-dist >/dev/null 2>&1; then
+            cargo-dist --version > /tmp/cargo-dist-version.txt
+            echo "DIST_CMD=cargo-dist" >> "$GITHUB_ENV"
+          elif command -v dist >/dev/null 2>&1; then
+            dist --version > /tmp/cargo-dist-version.txt
+            echo "DIST_CMD=dist" >> "$GITHUB_ENV"
+          else
+            echo "cargo-dist executable not found"
+            exit 1
+          fi
+          grep -F "cargo-dist ${CARGO_DIST_VERSION}" /tmp/cargo-dist-version.txt
 
       - name: Build release artifacts (dry-run, no publish)
-        run: cargo dist build --artifacts=global
+        run: ${DIST_CMD} build --artifacts=global
 
       - name: Verify dist outputs exist
         run: |
