@@ -93,7 +93,9 @@ jobs:
           grep -F "cargo-dist ${CARGO_DIST_VERSION}" /tmp/cargo-dist-version.txt
 
       - name: Build release artifacts (dry-run, no publish)
-        run: ${DIST_CMD} build --artifacts=global
+        run: |
+          HOST_TARGET="$(rustc -vV | sed -n 's/^host: //p')"
+          ${DIST_CMD} build --artifacts=global --target="${HOST_TARGET}"
 
       - name: Verify dist outputs exist
         run: |
