@@ -72,8 +72,13 @@ jobs:
           rustup default stable
 
       - name: Install cargo-dist
-        run: cargo install --locked cargo-dist --version ${CARGO_DIST_VERSION}
-
+        env:
+          CARGO_DIST_NO_MODIFY_PATH: "1"
+        run: |
+          curl -fsSL --proto '=https' --tlsv1.2 \
+            "https://github.com/axodotdev/cargo-dist/releases/download/v${CARGO_DIST_VERSION}/cargo-dist-installer.sh" \
+            -o /tmp/cargo-dist-installer.sh
+          sh /tmp/cargo-dist-installer.sh
       - name: Verify cargo-dist version
         run: cargo dist --version | grep -F "cargo-dist ${CARGO_DIST_VERSION}"
 
