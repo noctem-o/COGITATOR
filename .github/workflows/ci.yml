@@ -74,10 +74,15 @@ jobs:
       - name: Install cargo-dist
         run: |
           cargo install --locked cargo-dist --version ${CARGO_DIST_VERSION}
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          CARGO_BIN_DIR="$(dirname "$(command -v cargo)")"
+          echo "$CARGO_BIN_DIR" >> "$GITHUB_PATH"
+          echo "Using cargo bin dir: $CARGO_BIN_DIR"
+          ls -la "$CARGO_BIN_DIR" | rg 'cargo(-dist|$)' || true
 
       - name: Verify cargo-dist version
-        run: cargo-dist --version | grep -F "cargo-dist ${CARGO_DIST_VERSION}"
+        run: |
+          command -v cargo-dist
+          cargo-dist --version | grep -F "cargo-dist ${CARGO_DIST_VERSION}"
 
       - name: Build release artifacts (dry-run, no publish)
         run: cargo-dist build
