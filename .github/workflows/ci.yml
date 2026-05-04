@@ -90,7 +90,7 @@ jobs:
       - name: Verify dist outputs exist
         run: |
           test -d dist
-          test -n "$(find dist -maxdepth 1 -type f | head -n 1)"
+          test -n "$(find dist -type f | head -n 1)"
 
   no-git-build:
     needs: action-pin-policy
