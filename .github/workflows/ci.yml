@@ -89,8 +89,15 @@ jobs:
 
       - name: Verify dist outputs exist
         run: |
-          test -d dist
-          test -n "$(find dist -type f | head -n 1)"
+          if [ -d dist ] && [ -n "$(find dist -type f | head -n 1)" ]; then
+            exit 0
+          fi
+          if [ -d target/distrib ] && [ -n "$(find target/distrib -type f | head -n 1)" ]; then
+            exit 0
+          fi
+          echo "No artifacts found in dist/ or target/distrib"
+          find dist target/distrib -maxdepth 3 -type f 2>/dev/null || true
+          exit 1
 
   no-git-build:
     needs: action-pin-policy
