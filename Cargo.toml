@@ -36,4 +36,5 @@ members = ["."]
 [workspace.metadata.dist]
 dist = true
 installers = ["shell", "powershell"]
+targets = ["x86_64-unknown-linux-gnu"]
 ci = ["github"]

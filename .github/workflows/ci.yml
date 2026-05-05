@@ -81,13 +81,23 @@ jobs:
       - name: Verify cargo-dist version
         run: cargo dist --version | grep -F "cargo-dist ${CARGO_DIST_VERSION}"
 
+      - name: Initialize cargo-dist config
+        run: cargo dist init --yes
+
       - name: Build release artifacts (dry-run, no publish)
         run: cargo dist build --target=x86_64-unknown-linux-gnu
 
       - name: Verify dist outputs exist
         run: |
-          test -d dist
-          test -n "$(find dist -maxdepth 1 -type f | head -n 1)"
+          if [ -d dist ] && [ -n "$(find dist -type f | head -n 1)" ]; then
+            exit 0
+          fi
+          if [ -d target/distrib ] && [ -n "$(find target/distrib -type f | head -n 1)" ]; then
+            exit 0
+          fi
+          echo "No artifacts found in dist/ or target/distrib"
+          find dist target/distrib -maxdepth 3 -type f 2>/dev/null || true
+          exit 1
 
   no-git-build:
     needs: action-pin-policy
