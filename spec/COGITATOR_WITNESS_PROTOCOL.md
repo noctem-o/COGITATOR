@@ -1,4 +1,4 @@
-# COGITATOR Witness Protocol
+# Cogitator Witness Protocol
 
 **Version:** 1.0  
 **Status:** Draft  
@@ -10,9 +10,9 @@
 
 ## Abstract
 
-This document specifies the COGITATOR Witness Protocol -- a scheme for producing cryptographically verifiable, tamper-evident records of AI agent execution. A conforming implementation produces a single witness root value that any third party can independently recompute from the same inputs to verify the record was not altered after the fact.
+This document specifies the Cogitator Witness Protocol -- a scheme for producing cryptographically verifiable, tamper-evident records of AI agent execution. A conforming implementation produces a single witness root value that any third party can independently recompute from the same inputs to verify the record was not altered after the fact.
 
-The protocol is implementation-agnostic. The reference implementation is COGITATOR (Rust), but any language or framework can produce conforming witness bundles.
+The protocol is implementation-agnostic. The reference implementation is Cogitator (Rust), but any language or framework can produce conforming witness bundles.
 
 ---
 
@@ -20,7 +20,7 @@ The protocol is implementation-agnostic. The reference implementation is COGITAT
 
 AI agents deployed in regulated or high-stakes environments issue tool calls with real-world consequences. Existing audit approaches -- log ingestion, post-hoc summaries, model cards -- are reconstructive. They describe what probably happened, not what provably happened. Logs are mutable. Post-hoc summaries are interpretations.
 
-The COGITATOR Witness Protocol takes the position that agent execution should be as auditable as a compiled binary in a reproducible build system. The witness root is the runtime equivalent of a content-addressed store path: a cryptographic commitment that ties a specific output to a specific, verifiable execution.
+The Cogitator Witness Protocol takes the position that agent execution should be as auditable as a compiled binary in a reproducible build system. The witness root is the runtime equivalent of a content-addressed store path: a cryptographic commitment that ties a specific output to a specific, verifiable execution.
 
 ---
 
@@ -232,7 +232,7 @@ An implementation is conforming if:
 
 ## Relation to Regulatory Frameworks
 
-The COGITATOR Witness Protocol is designed to satisfy the technical requirements of:
+The Cogitator Witness Protocol is designed to satisfy the technical requirements of:
 
 - **EU AI Act (2024) Articles 12 and 9** -- tamper-evident record-keeping and risk management systems for high-risk AI.
 - **FCA AI and machine learning guidance** -- audit trails for automated decision systems in financial services.
@@ -258,4 +258,4 @@ Licensed under the Apache License, Version 2.0 (the "License"); you may not use 
 
 Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.
 
-Note: This specification document is licenced under Apache 2.0. The COGITATOR reference implementation is licenced separately under the Business Source License 1.1.
+Note: This specification document is licenced under Apache 2.0. The Cogitator reference implementation is licenced separately under the Business Source License 1.1.

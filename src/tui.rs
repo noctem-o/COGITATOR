@@ -80,7 +80,7 @@ pub fn launch(
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend).context("create terminal")?;
 
-    let pr_url = std::env::var("COGITATOR_PR_URL").ok();
+    let pr_url = std::env::var("Cogitator_PR_URL").ok();
     let palette = Palette::from_theme(theme, no_color);
 
     let pass_count = results.iter().filter(|result| result.passed).count();
@@ -103,7 +103,7 @@ pub fn launch(
             let title = Paragraph::new(vec![
                 Line::from(vec![
                     Span::styled(
-                        " ▸ COGITATOR",
+                        " ▸ Cogitator",
                         Style::default()
                             .fg(palette.secondary)
                             .add_modifier(Modifier::BOLD),
@@ -141,7 +141,7 @@ pub fn launch(
                 Line::from(""),
                 Line::from(match pr_url.as_deref() {
                     Some(url) => format!("Pull request: {}", url),
-                    None => "Pull request: not created yet (set COGITATOR_PR_URL)".to_string(),
+                    None => "Pull request: not created yet (set Cogitator_PR_URL)".to_string(),
                 }),
                 Line::from(""),
                 Line::from("Press q to exit. Press p to copy/view PR link when available."),
@@ -290,7 +290,7 @@ pub fn launch_agent(
 
             let mut title_spans = vec![
                 Span::styled(
-                    "▸ COGITATOR // Agent Observatory",
+                    "▸ Cogitator // Agent Observatory",
                     Style::default()
                         .fg(palette.secondary)
                         .add_modifier(Modifier::BOLD),

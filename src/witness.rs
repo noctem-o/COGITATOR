@@ -17,7 +17,7 @@ impl Witness {
     /// * `metadata_bytes` - Canonical JSON serialization of witnessed metadata
     pub fn new(metadata_bytes: &[u8]) -> Result<Self> {
         let mut hasher = Hasher::new();
-        hasher.update(b"COGITATOR/WITNESS/V1/INIT");
+        hasher.update(b"Cogitator/WITNESS/V1/INIT");
         hasher.update(metadata_bytes);
         let hash = *hasher.finalize().as_bytes();
         Ok(Self { hash })
@@ -37,7 +37,7 @@ impl Witness {
     /// * `event_bytes` - Canonical JSON serialization of a trace event or tool call
     pub fn update(&mut self, event_bytes: &[u8]) -> Result<()> {
         let mut hasher = Hasher::new();
-        hasher.update(b"COGITATOR/WITNESS/V1/STEP");
+        hasher.update(b"Cogitator/WITNESS/V1/STEP");
         hasher.update(&self.hash);
 
         // Domain-separated length-prefix encoding to prevent preimage collisions

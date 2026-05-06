@@ -1,4 +1,4 @@
-# COGITATOR policy fixture — explicit allow-all
+# Cogitator policy fixture — explicit allow-all
 #
 # An empty rules list is equivalent to allow-all, but having this file
 # on disk is useful when you want a non-empty policy_digest in the

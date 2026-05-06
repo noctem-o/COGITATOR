@@ -173,7 +173,7 @@ pub fn artifact_hashes(paths: &[&Path]) -> Result<BTreeMap<String, String>> {
 /// The BTreeMap iteration order is deterministic.
 pub fn bundle_hash(artifact_hashes: &BTreeMap<String, String>) -> Result<String> {
     let mut hasher = Sha256::new();
-    hasher.update(b"COGITATOR:BUNDLE:V1\n");
+    hasher.update(b"Cogitator:BUNDLE:V1\n");
 
     for (name, hash) in artifact_hashes {
         hasher.update(name.as_bytes());
