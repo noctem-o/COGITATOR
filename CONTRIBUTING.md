@@ -1,4 +1,4 @@
-# Contributing to COGITATOR
+# Contributing to Cogitator
 
 ## CI check sequence
 

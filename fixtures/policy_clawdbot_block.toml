@@ -1,4 +1,4 @@
-# COGITATOR policy fixture — clawdbot block-after-budget demo
+# Cogitator policy fixture — clawdbot block-after-budget demo
 #
 # Demonstrates the 2.0 pre-call interception layer.
 # Load with:  cogitator run --agent clawdbot --policy fixtures/policy_clawdbot_block.toml
@@ -21,7 +21,7 @@ verdict      = "block"
 reason       = "clawdbot tool call budget exceeded (max 1 per run)"
 
 # Rule 2 — Phantom any call to a 'research.*' namespace.
-# The agent believes the call was attempted; COGITATOR records the intent
+# The agent believes the call was attempted; Cogitator records the intent
 # but produces no side-effect.  Useful for observing speculative tool use.
 [[rules]]
 id           = "research-phantom"

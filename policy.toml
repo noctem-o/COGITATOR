@@ -1,4 +1,4 @@
-# COGITATOR policy file
+# Cogitator policy file
 # Evaluated before every tool call. Rules are matched top-to-bottom; first match wins.
 # If this file is absent, all calls are allowed (allow-all default).
 #

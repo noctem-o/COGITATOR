@@ -17,8 +17,8 @@
      version="3">
 
   <front>
-    <title abbrev="COGITATOR Witness Protocol">
-      COGITATOR Witness Protocol: Cryptographically Verifiable Audit Records for AI Agent Execution
+    <title abbrev="Cogitator Witness Protocol">
+      Cogitator Witness Protocol: Cryptographically Verifiable Audit Records for AI Agent Execution
     </title>
 
     <seriesInfo name="Internet-Draft" value="draft-noctem-cogitator-witness-protocol-00"/>
@@ -48,17 +48,17 @@
 
     <abstract>
       <t>
-        This document specifies the COGITATOR Witness Protocol -- a scheme for producing
+        This document specifies the Cogitator Witness Protocol -- a scheme for producing
         cryptographically verifiable, tamper-evident records of AI agent execution. A conforming
         implementation produces a single witness root value that any third party can independently
         recompute from the same inputs to verify the record was not altered after the fact.
       </t>
       <t>
-        The protocol is implementation-agnostic. The reference implementation is COGITATOR (Rust),
+        The protocol is implementation-agnostic. The reference implementation is Cogitator (Rust),
         but any language or framework can produce conforming witness bundles.
       </t>
       <t>
-        This document also describes how the COGITATOR Witness Protocol relates to the IETF SCITT
+        This document also describes how the Cogitator Witness Protocol relates to the IETF SCITT
         architecture, with which it is designed to be used as a payload inside SCITT Signed
         Statements.
       </t>
@@ -77,7 +77,7 @@
         provably happened. Logs are mutable. Post-hoc summaries are interpretations.
       </t>
       <t>
-        The COGITATOR Witness Protocol takes the position that agent execution should be as
+        The Cogitator Witness Protocol takes the position that agent execution should be as
         auditable as a compiled binary in a reproducible build system. The witness root is the
         runtime equivalent of a content-addressed store path: a cryptographic commitment that
         ties a specific output to a specific, verifiable execution.
@@ -85,7 +85,7 @@
       <t>
         This specification is intended to complement, not replace, the SCITT architecture
         (draft-ietf-scitt-architecture). SCITT provides the outer envelope: a Signed Statement
-        registered on a Transparency Service with a verifiable Receipt. The COGITATOR Witness
+        registered on a Transparency Service with a verifiable Receipt. The Cogitator Witness
         Protocol provides the inner payload: a structured, hash-chained record of what the agent
         did, attempted, and was blocked from doing.
       </t>
@@ -332,7 +332,7 @@ run_<id>/
     <section anchor="scitt-integration">
       <name>Integration with SCITT</name>
       <t>
-        The COGITATOR Witness Protocol is designed to be used as a payload within the SCITT
+        The Cogitator Witness Protocol is designed to be used as a payload within the SCITT
         architecture (draft-ietf-scitt-architecture). The RECOMMENDED integration pattern is:
       </t>
       <ol>
@@ -350,7 +350,7 @@ run_<id>/
 
     <section anchor="regulatory">
       <name>Relation to Regulatory Frameworks</name>
-      <t>The COGITATOR Witness Protocol is designed to address requirements of:</t>
+      <t>The Cogitator Witness Protocol is designed to address requirements of:</t>
       <ul>
         <li>EU AI Act (2024) Articles 12 and 9 -- tamper-evident record-keeping and risk management for high-risk AI.</li>
         <li>FCA AI and machine learning guidance -- audit trails for automated decision systems in financial services.</li>

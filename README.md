@@ -9,15 +9,15 @@
 
 > **Tamper-evident AI agent audit harness with a cryptographic witness chain, pre-call policy interception, and byte-stable replay. Written in Rust.**
 
-[![CI](https://img.shields.io/github/actions/workflow/status/noctem-o/COGITATOR/ci.yml?branch=main&label=CI&style=flat-square)](https://github.com/noctem-o/COGITATOR/actions)
-[![License: BUSL-1.1](https://img.shields.io/badge/license-BUSL--1.1-green.svg?style=flat-square)](https://github.com/noctem-o/COGITATOR/blob/main/LICENSE)
-[![Spec: Apache-2.0](https://img.shields.io/badge/spec-Apache--2.0-blue.svg?style=flat-square)](https://github.com/noctem-o/COGITATOR/blob/main/spec/COGITATOR_WITNESS_PROTOCOL.md)
+[![CI](https://img.shields.io/github/actions/workflow/status/noctem-o/Cogitator/ci.yml?branch=main&label=CI&style=flat-square)](https://github.com/noctem-o/Cogitator/actions)
+[![License: BUSL-1.1](https://img.shields.io/badge/license-BUSL--1.1-green.svg?style=flat-square)](https://github.com/noctem-o/Cogitator/blob/main/LICENSE)
+[![Spec: Apache-2.0](https://img.shields.io/badge/spec-Apache--2.0-blue.svg?style=flat-square)](https://github.com/noctem-o/Cogitator/blob/main/spec/Cogitator_WITNESS_PROTOCOL.md)
 [![Rust](https://img.shields.io/badge/rust-stable-orange.svg?style=flat-square)](https://www.rust-lang.org)
 [![IETF Draft](https://img.shields.io/badge/IETF-draft--noctem--cogitator--witness--protocol--00-lightgrey?style=flat-square)](https://datatracker.ietf.org/wg/scitt/about/)
 
 -----
 
-> 📄 **[Companion paper](https://github.com/noctem-o/COGITATOR/blob/main/main.pdf)** covers the cryptographic commitment model (BLAKE3 domain-separated hash chains, JCS/RFC 8785 canonical JSON), the witness/provenance split, DST fault-injection design, and reproducibility guarantees. It documents the v1.0 architecture; v2.0 builds pre-call policy interception on top of that foundation.
+> 📄 **[Companion paper](https://github.com/noctem-o/Cogitator/blob/main/main.pdf)** covers the cryptographic commitment model (BLAKE3 domain-separated hash chains, JCS/RFC 8785 canonical JSON), the witness/provenance split, DST fault-injection design, and reproducibility guarantees. It documents the v1.0 architecture; v2.0 builds pre-call policy interception on top of that foundation.
 
 -----
 
@@ -53,7 +53,7 @@ AI agents are being deployed into regulated environments like financial trading,
 1. **Was the agent operating within its sanctioned boundaries at the time of each call?** Runtime policy is typically advisory, unenforced, or checked after dispatch. By that point the side effect has already happened.
 1. **Can an independent auditor reproduce the same result from the same inputs?** Without deterministic replay, audit is interpretation, not verification. “We reviewed the logs” is not the same as “we re-ran the execution and got the same witness root.”
 
-COGITATOR is a direct engineering answer to all three. Every run produces a cryptographic witness root, a BLAKE3 hash chain over RFC 8785 canonical JSON, that any third party can independently recompute to confirm the record was not altered after the fact. As of v2.0, COGITATOR also intercepts every tool call *before* dispatch, evaluates it against a declarative policy, and records the decision as an auditable artifact committed into the witness chain.
+Cogitator is a direct engineering answer to all three. Every run produces a cryptographic witness root, a BLAKE3 hash chain over RFC 8785 canonical JSON, that any third party can independently recompute to confirm the record was not altered after the fact. As of v2.0, Cogitator also intercepts every tool call *before* dispatch, evaluates it against a declarative policy, and records the decision as an auditable artifact committed into the witness chain.
 
 -----
 
@@ -437,18 +437,18 @@ nix-shell -p rustc cargo rustfmt   # without flakes
 
 AI agents are already being deployed in regulated industries like financial services, healthcare, and legal without any standardised way to prove the agent behaved as claimed. Existing approaches, things like log ingestion, RAG-based audit tools, and model cards, are all reconstructive. They describe what *probably* happened, not what *provably* happened.
 
-COGITATOR starts from the position that agent execution should be as auditable as a compiled binary in a reproducible build system. The witness root is the runtime equivalent of a Nix store path: a cryptographic commitment that ties a specific output to a specific, verifiable execution. The v2.0 policy layer extends this further. It is not enough to prove what an agent *did*; a complete audit also needs to prove what the agent *tried to do and was blocked from doing*.
+Cogitator starts from the position that agent execution should be as auditable as a compiled binary in a reproducible build system. The witness root is the runtime equivalent of a Nix store path: a cryptographic commitment that ties a specific output to a specific, verifiable execution. The v2.0 policy layer extends this further. It is not enough to prove what an agent *did*; a complete audit also needs to prove what the agent *tried to do and was blocked from doing*.
 
 ### Where it applies
 
-- **EU AI Act compliance.** Articles 12 and 9 require tamper-evident record-keeping and risk management for high-risk AI systems. COGITATOR is a ready technical substrate for both.
+- **EU AI Act compliance.** Articles 12 and 9 require tamper-evident record-keeping and risk management for high-risk AI systems. Cogitator is a ready technical substrate for both.
 - **Regulated AI deployment.** Financial regulators like the FCA and SEC, as well as healthcare frameworks like FDA SaMD guidance, are moving toward mandatory audit trails for high-autonomy systems. The witness root is a concrete artifact that satisfies tamper-evident log requirements without needing to trust operator infrastructure.
 - **Safety-critical robotics.** The policy layer acts as a capability firewall. The AI decision system can operate non-deterministically internally, but it cannot dispatch a command outside the pre-approved operational envelope. Every blocked command is committed into the witness chain, provably. This applies directly to surgical robotics, autonomous vehicles, and industrial automation under IEC 61508.
 - **AI liability and insurance.** Insurers and legal counsel currently rely on manufacturer-provided logs to reconstruct AI incidents, which is an inherent conflict of interest. The witness root gives any third party an independent verification path from the same inputs, with no need to trust the operator’s infrastructure.
 - **AI red-teaming and safety evaluation.** Security researchers can define capability restrictions via policy, run an agent, and produce a tamper-evident record of what the agent attempted or was blocked from attempting.
 - **Multi-party AI contracting.** When an AI agent acts on behalf of one party against a third-party service, both sides can independently verify the same witness root.
-- **Benchmark integrity.** Public AI benchmarks are vulnerable to cherry-picking and post-hoc result manipulation. COGITATOR makes benchmark runs independently replayable and verifiable.
-- **Model-level compliance testing.** Organisations deploying frontier models can run COGITATOR as a CI gate; if the witness root drifts across model versions for a given policy file, the deployment gets flagged.
+- **Benchmark integrity.** Public AI benchmarks are vulnerable to cherry-picking and post-hoc result manipulation. Cogitator makes benchmark runs independently replayable and verifiable.
+- **Model-level compliance testing.** Organisations deploying frontier models can run Cogitator as a CI gate; if the witness root drifts across model versions for a given policy file, the deployment gets flagged.
 
 -----
 
@@ -456,7 +456,7 @@ COGITATOR starts from the position that agent execution should be as auditable a
 
 - **Multi-agent witness composition.** Extending the hash chain model to orchestrated multi-agent runs where sub-agent witness roots are nested into a parent root.
 - **Formal policy verification.** Using the TOML policy grammar as input to a formal model checker to prove policy rules are consistent and non-bypassable.
-- **Formal decision layer verification.** Replacing probabilistic AI components in safety-critical deployments with TLA+-specified decision logic, with COGITATOR providing the audit envelope. This would extend provable bounded behaviour from the policy layer into the decision layer itself.
+- **Formal decision layer verification.** Replacing probabilistic AI components in safety-critical deployments with TLA+-specified decision logic, with Cogitator providing the audit envelope. This would extend provable bounded behaviour from the policy layer into the decision layer itself.
 - **Hardware attestation integration.** Binding the witness root to a TPM attestation quote so tamper-evidence extends from software into silicon.
 - **Differential privacy for traces.** Adding noise-injection mechanisms to agent traces that preserve witness root integrity while reducing privacy leakage from sensitive tool arguments.
 - **SCITT Transparency Service registration.** Carrying the witness root as a SCITT Signed Statement payload for externally verifiable timestamping and proof of inclusion on a Transparency Service.
@@ -465,9 +465,9 @@ COGITATOR starts from the position that agent execution should be as auditable a
 
 ## Protocol Specification
 
-The COGITATOR Witness Protocol is specified as a standalone document under Apache 2.0, separate from this implementation. Anyone is free to implement, cite, or build on the protocol without restriction from this codebase.
+The Cogitator Witness Protocol is specified as a standalone document under Apache 2.0, separate from this implementation. Anyone is free to implement, cite, or build on the protocol without restriction from this codebase.
 
-- **Spec:** [`spec/COGITATOR_WITNESS_PROTOCOL.md`](https://github.com/noctem-o/COGITATOR/blob/main/spec/COGITATOR_WITNESS_PROTOCOL.md)
+- **Spec:** [`spec/Cogitator_WITNESS_PROTOCOL.md`](https://github.com/noctem-o/Cogitator/blob/main/spec/Cogitator_WITNESS_PROTOCOL.md)
 - **IETF Internet-Draft:** `draft-noctem-cogitator-witness-protocol-00` (independent submission; relates to the [IETF SCITT working group](https://datatracker.ietf.org/wg/scitt/about/))
 
 The protocol is designed to be carried as the payload of a SCITT Signed Statement, with the witness root registered on a Transparency Service for an externally verifiable timestamp and proof of inclusion.
@@ -486,7 +486,7 @@ The protocol is designed to be carried as the payload of a SCITT Signed Statemen
 ├── tasks/          # Task definitions
 ├── replay/         # Example replay bundle (run_0000)
 ├── paper/          # Companion paper (v1.0 architecture)
-└── spec/           # COGITATOR Witness Protocol specification (Apache 2.0)
+└── spec/           # Cogitator Witness Protocol specification (Apache 2.0)
 ```
 
 -----
@@ -518,7 +518,7 @@ Nix metadata is captured as provenance only and never alters witness roots. On n
 
 ## Contributing
 
-See [CONTRIBUTING.md](https://github.com/noctem-o/COGITATOR/blob/main/CONTRIBUTING.md).
+See [CONTRIBUTING.md](https://github.com/noctem-o/Cogitator/blob/main/CONTRIBUTING.md).
 
 -----
 
@@ -530,6 +530,6 @@ See [CONTRIBUTING.md](https://github.com/noctem-o/COGITATOR/blob/main/CONTRIBUTI
 
 ## License
 
-**Implementation:** [Business Source License 1.1](https://github.com/noctem-o/COGITATOR/blob/main/LICENSE). Free for non-production use; commercial production use requires a licence. Converts to Apache 2.0 on 2029-04-09.
+**Implementation:** [Business Source License 1.1](https://github.com/noctem-o/Cogitator/blob/main/LICENSE). Free for non-production use; commercial production use requires a licence. Converts to Apache 2.0 on 2029-04-09.
 
-**Protocol specification** at [`spec/COGITATOR_WITNESS_PROTOCOL.md`](https://github.com/noctem-o/COGITATOR/blob/main/spec/COGITATOR_WITNESS_PROTOCOL.md): Apache 2.0. Free to implement, cite, and build on independently of this implementation.
+**Protocol specification** at [`spec/Cogitator_WITNESS_PROTOCOL.md`](https://github.com/noctem-o/Cogitator/blob/main/spec/Cogitator_WITNESS_PROTOCOL.md): Apache 2.0. Free to implement, cite, and build on independently of this implementation.
