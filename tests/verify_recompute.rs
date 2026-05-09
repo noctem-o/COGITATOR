@@ -252,3 +252,191 @@ fn recompute_detects_phantom_entry_tamper() {
         .expect("semantic mismatch should include diagnostics");
     assert!(diff.contains("interceptions_only="), "diagnostic: {diff}");
 }
+
+#[test]
+fn recompute_rejects_orphan_tool_call_step() {
+    let temp = tempdir().expect("tempdir");
+    write_bundle(temp.path(), base_call()).expect("bundle");
+    let path = temp.path().join("tool_transcript.json");
+    let mut transcript: ToolTranscriptRecord =
+        serde_json::from_slice(&fs::read(&path).expect("read transcript")).expect("parse");
+    transcript.entries[0].step = 99;
+    canonical_json::write_json(&path, &transcript, "tool_transcript.json").expect("rewrite");
+
+    let err = verify::recompute_agent_witness_root_from_bundle(temp.path(), None)
+        .expect_err("orphan step must fail");
+    assert!(err.to_string().contains("orphan tool call at absent step"));
+}
+
+#[test]
+fn recompute_rejects_orphan_phantom_step() {
+    let temp = tempdir().expect("tempdir");
+    write_bundle(temp.path(), base_call()).expect("bundle");
+    let path = temp.path().join("tool_transcript.json");
+    let mut transcript: ToolTranscriptRecord =
+        serde_json::from_slice(&fs::read(&path).expect("read transcript")).expect("parse");
+    transcript.entries.clear();
+    transcript.phantom_entries.push(PhantomEntry {
+        step: 99,
+        tool_call_idx: 0,
+        tool_name: "clawdbot.lookup".to_string(),
+        request: serde_json::json!({"case":"alpha"}),
+        disposition: cogitator::policy::PhantomDisposition::Blocked,
+        rule_id: None,
+        reason: "blocked".to_string(),
+    });
+    canonical_json::write_json(&path, &transcript, "tool_transcript.json").expect("rewrite");
+
+    let err = verify::recompute_agent_witness_root_from_bundle(temp.path(), None)
+        .expect_err("orphan step must fail");
+    assert!(err
+        .to_string()
+        .contains("orphan phantom entry at absent step"));
+}
+
+#[test]
+fn recompute_rejects_duplicate_real_tool_call_idx() {
+    let temp = tempdir().expect("tempdir");
+    write_bundle(temp.path(), base_call()).expect("bundle");
+    let path = temp.path().join("tool_transcript.json");
+    let mut transcript: ToolTranscriptRecord =
+        serde_json::from_slice(&fs::read(&path).expect("read transcript")).expect("parse");
+    let mut dup = transcript.entries[0].clone();
+    dup.step = 0;
+    dup.tool_call_idx = 0;
+    transcript.entries.push(dup);
+    canonical_json::write_json(&path, &transcript, "tool_transcript.json").expect("rewrite");
+
+    let err = verify::recompute_agent_witness_root_from_bundle(temp.path(), None)
+        .expect_err("duplicate idx must fail");
+    assert!(err.to_string().contains("duplicate tool_call_idx"));
+}
+
+#[test]
+fn recompute_rejects_real_phantom_tool_call_idx_collision() {
+    let temp = tempdir().expect("tempdir");
+    write_bundle(temp.path(), base_call()).expect("bundle");
+    let path = temp.path().join("tool_transcript.json");
+    let mut transcript: ToolTranscriptRecord =
+        serde_json::from_slice(&fs::read(&path).expect("read transcript")).expect("parse");
+    transcript.phantom_entries.push(PhantomEntry {
+        step: 0,
+        tool_call_idx: 0,
+        tool_name: "clawdbot.lookup".to_string(),
+        request: serde_json::json!({"case":"alpha"}),
+        disposition: cogitator::policy::PhantomDisposition::Phantom,
+        rule_id: None,
+        reason: "phantom".to_string(),
+    });
+    canonical_json::write_json(&path, &transcript, "tool_transcript.json").expect("rewrite");
+
+    let err = verify::recompute_agent_witness_root_from_bundle(temp.path(), None)
+        .expect_err("collision must fail");
+    assert!(err
+        .to_string()
+        .contains("executed/phantom tool_call_idx collision"));
+}
+
+#[test]
+fn recompute_rejects_non_contiguous_tool_call_idx() {
+    let temp = tempdir().expect("tempdir");
+    write_bundle(temp.path(), base_call()).expect("bundle");
+    let path = temp.path().join("tool_transcript.json");
+    let mut transcript: ToolTranscriptRecord =
+        serde_json::from_slice(&fs::read(&path).expect("read transcript")).expect("parse");
+    transcript.entries[0].tool_call_idx = 1;
+    canonical_json::write_json(&path, &transcript, "tool_transcript.json").expect("rewrite");
+
+    let err = verify::recompute_agent_witness_root_from_bundle(temp.path(), None)
+        .expect_err("gap must fail");
+    assert!(err.to_string().contains("non-contiguous tool_call_idx"));
+}
+
+#[test]
+fn recompute_rejects_non_increasing_agent_trace_steps() {
+    let temp = tempdir().expect("tempdir");
+    write_bundle(temp.path(), base_call()).expect("bundle");
+    let path = temp.path().join("agent_trace.json");
+    let mut trace_entries: Vec<AgentTraceEntry> =
+        serde_json::from_slice(&fs::read(&path).expect("read trace")).expect("parse");
+    trace_entries.push(trace_entries[0].clone());
+    canonical_json::write_json(&path, &trace_entries, "agent_trace.json").expect("rewrite");
+
+    let err = verify::recompute_agent_witness_root_from_bundle(temp.path(), None)
+        .expect_err("duplicate steps must fail");
+    assert!(err
+        .to_string()
+        .contains("agent_trace steps must be strictly increasing"));
+}
+
+#[test]
+fn recompute_rejects_absolute_manifest_path() {
+    let temp = tempdir().expect("tempdir");
+    write_bundle(temp.path(), base_call()).expect("bundle");
+    let manifest_path = temp.path().join("witness_manifest.json");
+    let mut manifest: WitnessManifest =
+        serde_json::from_slice(&fs::read(&manifest_path).expect("read manifest")).expect("parse");
+    manifest.meta_json = temp.path().join("meta.json").to_string_lossy().to_string();
+    canonical_json::write_json(&manifest_path, &manifest, "witness_manifest.json")
+        .expect("rewrite");
+    let err = verify::recompute_agent_witness_root_from_bundle(temp.path(), None)
+        .expect_err("absolute path should fail");
+    assert!(err
+        .to_string()
+        .contains("absolute manifest path is forbidden"));
+}
+
+#[test]
+fn recompute_rejects_manifest_parent_escape() {
+    let temp = tempdir().expect("tempdir");
+    write_bundle(temp.path(), base_call()).expect("bundle");
+    let manifest_path = temp.path().join("witness_manifest.json");
+    let mut manifest: WitnessManifest =
+        serde_json::from_slice(&fs::read(&manifest_path).expect("read manifest")).expect("parse");
+    manifest.meta_json = "../meta.json".to_string();
+    canonical_json::write_json(&manifest_path, &manifest, "witness_manifest.json")
+        .expect("rewrite");
+    let err = verify::recompute_agent_witness_root_from_bundle(temp.path(), None)
+        .expect_err("escape should fail");
+    assert!(err
+        .to_string()
+        .contains("failed to canonicalize manifest artifact path"));
+}
+
+#[test]
+fn recompute_rejects_missing_nested_manifest_path_without_fallback() {
+    let temp = tempdir().expect("tempdir");
+    write_bundle(temp.path(), base_call()).expect("bundle");
+    let manifest_path = temp.path().join("witness_manifest.json");
+    let mut manifest: WitnessManifest =
+        serde_json::from_slice(&fs::read(&manifest_path).expect("read manifest")).expect("parse");
+    manifest.meta_json = "nested/meta.json".to_string();
+    canonical_json::write_json(&manifest_path, &manifest, "witness_manifest.json")
+        .expect("rewrite");
+    let err = verify::recompute_agent_witness_root_from_bundle(temp.path(), None)
+        .expect_err("missing nested path should fail");
+    assert!(err
+        .to_string()
+        .contains("failed to canonicalize manifest artifact path"));
+}
+
+#[test]
+fn recompute_accepts_moved_bundle_with_relative_manifest_paths() {
+    let temp = tempdir().expect("tempdir");
+    write_bundle(temp.path(), base_call()).expect("bundle");
+    let copied = tempdir().expect("copied");
+    for name in [
+        "meta.json",
+        "agent_trace.json",
+        "tool_transcript.json",
+        "drift_report.json",
+        "hash_chain.txt",
+        "witness_root.txt",
+        "witness_manifest.json",
+    ] {
+        fs::copy(temp.path().join(name), copied.path().join(name)).expect("copy artifact");
+    }
+    let receipt = verify::recompute_agent_witness_root_from_bundle(copied.path(), None)
+        .expect("recompute on copied bundle");
+    assert!(receipt.matched);
+}

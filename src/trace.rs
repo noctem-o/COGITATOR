@@ -279,6 +279,34 @@ fn validate_agent_witness_inputs(
             anyhow::bail!("non-contiguous tool_call_idx; missing {}", idx);
         }
     }
+
+    let mut ops_by_step = index_tool_ops_by_step(tool_calls, phantom_entries);
+    for entry in agent_trace {
+        let mut ops = ops_by_step.remove(&entry.step).unwrap_or_default();
+        ops.sort_by_key(|op| op.tool_call_idx());
+        if entry.tool_requests.len() != ops.len() {
+            anyhow::bail!(
+                "tool request/op count mismatch at step {}: trace={} transcript={}",
+                entry.step,
+                entry.tool_requests.len(),
+                ops.len()
+            );
+        }
+        for (request, op) in entry.tool_requests.iter().zip(ops.iter()) {
+            let (tool_name, arguments) = match op {
+                ToolOpWitnessView::Executed(call) => (&call.tool_name, &call.request),
+                ToolOpWitnessView::Intercepted(phantom) => (&phantom.tool_name, &phantom.request),
+            };
+            if request.tool_name != *tool_name || request.arguments != *arguments {
+                anyhow::bail!(
+                    "tool request/op mismatch at step {} for tool_call_idx {}",
+                    entry.step,
+                    op.tool_call_idx()
+                );
+            }
+        }
+    }
+
     Ok(())
 }
 
