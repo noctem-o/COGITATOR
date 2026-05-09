@@ -259,7 +259,16 @@ fn witness_root_sorts_tool_calls_by_index() {
         role: "assistant".to_string(),
         thought: "probe".to_string(),
         action: "lookup".to_string(),
-        tool_requests: vec![],
+        tool_requests: vec![
+            ToolRequest {
+                tool_name: "clawdbot.lookup".to_string(),
+                arguments: serde_json::json!({"order": "first"}),
+            },
+            ToolRequest {
+                tool_name: "clawdbot.lookup".to_string(),
+                arguments: serde_json::json!({"order": "second"}),
+            },
+        ],
         is_final: false,
     }];
 
@@ -499,7 +508,10 @@ fn witness_root_changes_on_semantic_output_change() {
         role: "assistant".to_string(),
         thought: "x".to_string(),
         action: "y".to_string(),
-        tool_requests: vec![],
+        tool_requests: vec![ToolRequest {
+            tool_name: "clawdbot.lookup".to_string(),
+            arguments: serde_json::json!({"k": "v"}),
+        }],
         is_final: true,
     }];
 
@@ -545,7 +557,10 @@ fn witness_root_ignores_simulated_latency() {
         role: "assistant".to_string(),
         thought: "x".to_string(),
         action: "y".to_string(),
-        tool_requests: vec![],
+        tool_requests: vec![ToolRequest {
+            tool_name: "clawdbot.lookup".to_string(),
+            arguments: serde_json::json!({"k": "v"}),
+        }],
         is_final: true,
     }];
 
@@ -590,7 +605,10 @@ fn witness_root_ignores_fault_metadata_shape_details() {
         role: "assistant".to_string(),
         thought: "x".to_string(),
         action: "y".to_string(),
-        tool_requests: vec![],
+        tool_requests: vec![ToolRequest {
+            tool_name: "clawdbot.lookup".to_string(),
+            arguments: serde_json::json!({"k": "v"}),
+        }],
         is_final: true,
     }];
 

@@ -18,15 +18,6 @@ pub fn resolve_bundle_relative_path(witness_dir: &Path, raw: &str) -> Result<Pat
         anyhow::bail!("absolute manifest path is forbidden: {}", raw);
     }
     let joined = root.join(&candidate);
-    let joined = if joined.exists() {
-        joined
-    } else {
-        root.join(
-            candidate
-                .file_name()
-                .ok_or_else(|| anyhow::anyhow!("invalid empty manifest path: {}", raw))?,
-        )
-    };
     let canon = std::fs::canonicalize(&joined).with_context(|| {
         format!(
             "failed to canonicalize manifest artifact path {}",
@@ -161,6 +152,7 @@ fn sync_dir(_dir: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     #[derive(serde::Serialize)]
     struct ReportRow {
@@ -179,5 +171,52 @@ mod tests {
             std::str::from_utf8(&bytes).expect("utf8"),
             "{\"score\":0.25}\n"
         );
+    }
+
+    #[test]
+    fn resolve_bundle_relative_path_rejects_absolute_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let absolute = dir.path().join("meta.json");
+        let err = resolve_bundle_relative_path(dir.path(), &absolute.to_string_lossy())
+            .expect_err("absolute path must fail");
+        assert!(err
+            .to_string()
+            .contains("absolute manifest path is forbidden"));
+    }
+
+    #[test]
+    fn resolve_bundle_relative_path_rejects_parent_escape() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let err =
+            resolve_bundle_relative_path(dir.path(), "../meta.json").expect_err("escape must fail");
+        assert!(err
+            .to_string()
+            .contains("failed to canonicalize manifest artifact path"));
+    }
+
+    #[test]
+    fn resolve_bundle_relative_path_rejects_missing_nested_without_basename_fallback() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        fs::write(dir.path().join("meta.json"), b"{}").expect("write");
+        let err = resolve_bundle_relative_path(dir.path(), "nested/meta.json")
+            .expect_err("missing nested must fail");
+        assert!(err
+            .to_string()
+            .contains("failed to canonicalize manifest artifact path"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_bundle_relative_path_rejects_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let outside = tempfile::tempdir().expect("outside");
+        fs::write(outside.path().join("meta.json"), b"{}").expect("write outside");
+        symlink(outside.path(), dir.path().join("jump")).expect("symlink");
+
+        let err = resolve_bundle_relative_path(dir.path(), "jump/meta.json")
+            .expect_err("symlink escape must fail");
+        assert!(err.to_string().contains("escapes witness dir"));
     }
 }
