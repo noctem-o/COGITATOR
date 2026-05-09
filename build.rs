@@ -1,7 +1,7 @@
 fn main() {
-    println!("cargo:rerun-if-env-changed=Cogitator_GIT_SHA");
+    println!("cargo:rerun-if-env-changed=COGITATOR_GIT_SHA");
 
-    if std::env::var("Cogitator_GIT_SHA").is_ok() {
+    if std::env::var("COGITATOR_GIT_SHA").is_ok() {
         return;
     }
 
@@ -19,5 +19,5 @@ fn main() {
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "unknown".to_string());
 
-    println!("cargo:rustc-env=Cogitator_GIT_SHA={sha}");
+    println!("cargo:rustc-env=COGITATOR_GIT_SHA={sha}");
 }
