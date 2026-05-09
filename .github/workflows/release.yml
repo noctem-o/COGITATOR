@@ -45,7 +45,34 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: cargo dist host --steps=upload
 
+      - name: Collect attestation subjects
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          subjects_dir="attestation-subjects"
+          rm -rf "${subjects_dir}"
+          mkdir -p "${subjects_dir}"
+
+          found=0
+          for artifact_dir in dist target/distrib; do
+            if [[ -d "${artifact_dir}" ]]; then
+              while IFS= read -r -d '' file; do
+                cp "${file}" "${subjects_dir}/"
+                found=1
+              done < <(find "${artifact_dir}" -maxdepth 1 -type f -print0)
+            fi
+          done
+
+          if [[ "${found}" -eq 0 ]]; then
+            echo "No release artifact files found in dist/ or target/distrib/."
+            exit 1
+          fi
+
+          echo "Attestation subjects:"
+          ls -l "${subjects_dir}"
+
       - name: Attest release build provenance
         uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
         with:
-          subject-path: dist/*
+          subject-path: attestation-subjects/*
