@@ -71,7 +71,7 @@ mod tui;
 #[derive(Parser, Debug)]
 #[command(
     name = "cogitator",
-    version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("Cogitator_GIT_SHA"), ")"),
+    version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("COGITATOR_GIT_SHA"), ")"),
     about = "Deterministic evaluation harness"
 )]
 pub struct Cli {
@@ -723,7 +723,7 @@ fn parse_bool_env(value: &str) -> bool {
 }
 
 fn resolve_ordeal_regress() -> bool {
-    if let Ok(value) = std::env::var("Cogitator_ORDEAL_REGRESS") {
+    if let Ok(value) = std::env::var("COGITATOR_ORDEAL_REGRESS") {
         return parse_bool_env(&value);
     }
     false
@@ -1636,8 +1636,8 @@ mod tests {
     impl Drop for EnvRestore {
         fn drop(&mut self) {
             match self.new_value.as_ref() {
-                Some(value) => std::env::set_var("Cogitator_ORDEAL_REGRESS", value),
-                None => std::env::remove_var("Cogitator_ORDEAL_REGRESS"),
+                Some(value) => std::env::set_var("COGITATOR_ORDEAL_REGRESS", value),
+                None => std::env::remove_var("COGITATOR_ORDEAL_REGRESS"),
             }
         }
     }
@@ -1679,16 +1679,16 @@ mod tests {
     fn ordeal_regress_env_is_read() {
         let _guard = env_lock();
         let _restore = EnvRestore {
-            new_value: std::env::var("Cogitator_ORDEAL_REGRESS").ok(),
+            new_value: std::env::var("COGITATOR_ORDEAL_REGRESS").ok(),
         };
 
-        std::env::remove_var("Cogitator_ORDEAL_REGRESS");
+        std::env::remove_var("COGITATOR_ORDEAL_REGRESS");
         assert!(!resolve_ordeal_regress());
 
-        std::env::set_var("Cogitator_ORDEAL_REGRESS", "0");
+        std::env::set_var("COGITATOR_ORDEAL_REGRESS", "0");
         assert!(!resolve_ordeal_regress());
 
-        std::env::set_var("Cogitator_ORDEAL_REGRESS", "true");
+        std::env::set_var("COGITATOR_ORDEAL_REGRESS", "true");
         assert!(resolve_ordeal_regress());
     }
 
